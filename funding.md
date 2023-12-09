@@ -9,29 +9,31 @@ Coordination-play offers funding tools for an organization to raise funds from i
 
 Many crypto native DAOs and projects that need to raise funds to fund their development are forced into inflexible standard VC contracts that do not fit well with the programmable onchain world. 
 
-We envision a richer set of programmable equyity primitives that allow onchain projects to sell ownership of the project while providing guarantees as much as possible to the investors.    
+We envision a richer set of programmable equity primitives that allow onchain projects to sell ownership of the project while providing guarantees to investors. The first guarantee we have implemented is: 
+1. Spending conditions: Conditional spending of funds raised (tap streaming over x period, milestones, investor approval..etc)
+2. Withdrawability guarantees: Ability to redeem locked investment (burn tokens) if some x conditions are not met 
 
-### Venture stage funding 
-
-It is a venture stage funding contract. 
-
-A stage is a finite funding requirement by the existing team and defines the following:
-- exact funding amount
-- issued shares
-- pricing function 
-- governance rights
-- liquidity unlock conditions
-- spending conditions 
-
-note: A stage is traditional startups  is usually thought of as pre-seed, seed, series-A, series-B,..etc. where each is a stage on its own. 
+We envision a lot more guarantees that investors would like that can be composably added to the protocol. 
 
 
-### user  
+### The round: a Venture stage funding 
 
-Step1: set up an organization on the main page
-Step2: populate the fields in the funding page and deploy
+It is a venture stage funding contract called `Round`. 
 
-* Can the owner delete the round? Yes if no funds are in the contract? 
-* Stages of the contract: No funds, funds but not threshold, threshold reached, active
+A round is a finite funding requirement by the existing team and defines the following:
+1. Funding targets: Exact funding target, tokens on offer 
+2. Pricing Function: rising price curve (first come better price) 
+3. Governance rights: Voting rights on some issues
+4. Exit conditions 
+5. Spending conditions
+6. Investor protections
+- token inflation
+- round down protections
+- conditions on future rounds
+
+
+note: A round in traditional startups is usually thought of as one of pre-seed, seed, series-A, series-B,..etc.
+
+### use 
 
 
