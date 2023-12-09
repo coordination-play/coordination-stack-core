@@ -6,6 +6,11 @@
 use starknet::ContractAddress;
 use array::Array;
 
+struct LockedShare {
+    amount: u256,
+    unlock_time: u64
+}
+
 //
 // Contract Interface
 //
@@ -24,17 +29,23 @@ trait IShares<TContractState> {
     fn approve(ref self: TContractState, spender: ContractAddress, amount: u256) -> bool;
     fn increase_allowance(ref self: TContractState, spender: ContractAddress, added_value: u256) -> bool;
     fn decrease_allowance(ref self: TContractState, spender: ContractAddress, subtracted_value: u256) -> bool;
-    fn safe_mint(ref self: TContractState, to: ContractAddress, amount: u256);
+    fn issue_new_shares(ref self: TContractState, to: ContractAddress, amount: u256);
     fn safe_burn(ref self: TContractState, to: ContractAddress) -> (u256, u256);
 }
 
 #[starknet::contract]
 mod Share {
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
+    use super::LockedShare;
 
+    //
+    // Storage Shares
+    //
     #[storage]
     struct Storage {
-        _minters: LegacyMap::<ContractAddress, bool>, // list of all round contracts with minting power. 
+        _minters : LegacyMap::<ContractAddress, bool>, // list of all round contracts with minting power. 
+        _investors_locks : LegacyMap::<(ContractAddress, u8), LockedShare>, // mapping to store all the locked shares
+        _locks_len : LegacyMap::<ContractAddress, u8>, // to keep counts of locks for each investors.
     }
 
     //
@@ -104,6 +115,34 @@ mod Share {
             ERC20::ERC20::allowance(@erc20_state, owner, spender)
         }
 
+        fn locked_balance(self: @ContractState, account: ContractAddress) -> u256 {
+            let block_timestamp = get_block_timestamp();
+            // let erc20_state = ERC20::unsafe_new_contract_state();
+            // let total_balance = ERC20::ERC20::balance_of(@erc20_state, account);
+            let mut locked = 0;
+            let locks_len = self._locks_len.read(account);
+            let current_index = 0;
+            loop {
+                if (current_index == _locks_len) {
+                    break;
+                }
+                let lock = self._investors_locks.read((account,current_index));
+                if (block_timestamp < lock.unlock_time) {
+                    locked += lock.amount;
+                }
+                current_index += 1;
+            }
+            locked
+        }
+
+        fn unlocked_balance(self: @ContractState, account: ContractAddress) -> u256 {
+            let erc20_state = ERC20::unsafe_new_contract_state();
+            let total_balance = ERC20::ERC20::balance_of(@erc20_state, account);
+            let locked = locked_balance(account);
+            
+            total_balance - locked
+        }
+
 
         //
         // Externals ERC20
@@ -114,6 +153,9 @@ mod Share {
         // @param amount Amount of tokens to transfer
         // @return success 0 or 1
         fn transfer(ref self: ContractState, recipient: ContractAddress, amount: u256) -> bool {
+            let caller = get_caller_address();
+            let unlocked = unlocked_balance(caller);
+            assert (unlocked > amount, 'INSUFFICIENT_UNLOCKED');
             let mut erc20_state = ERC20::unsafe_new_contract_state();
             ERC20::ERC20::transfer(ref erc20_state, recipient, amount);
             true
@@ -126,6 +168,8 @@ mod Share {
         // @param amount Amount of tokens to transfer
         // @return success 0 or 1
         fn transfer_from(ref self: ContractState, sender: ContractAddress, recipient: ContractAddress, amount: u256) -> bool {
+            let unlocked = unlocked_balance(sender);
+            assert (unlocked > amount, 'INSUFFICIENT_UNLOCKED');
             let mut erc20_state = ERC20::unsafe_new_contract_state();
             ERC20::ERC20::transfer_from(ref erc20_state, sender, recipient, amount);
             true
@@ -171,17 +215,25 @@ mod Share {
         }
 
 
-        fn safe_mint(ref self: ContractState, to: ContractAddress, amount: u256) {
+        fn issue_new_shares(ref self: ContractState, to: ContractAddress, amount: u256, lock_duration: u64) {
             let caller = get_caller_address();
-            assert(self._minters.read(caller) == true, "NO_MINTING_POWER");
+            let block_timestamp = get_block_timestamp();
+            assert(self._minters.read(caller) == true, "NO_POWER_TO_ISSUE");
 
             let mut erc20_state = ERC20::unsafe_new_contract_state();
             ERC20::InternalImpl::_mint(ref erc20_state, to, amount);
+
+            let new_lock = LockedShare{amount: amount, unlock_time: block_timestamp + lock_duration};
+            let locks_len = self._locks_len.read();
+            self._investors_locks.write((to, locks_len), new_lock);
+            self._locks_len.write(locks_len + 1);
 
         }
 
         fn safe_burn(ref self: ContractState, amount: u256) {
             let caller = get_caller_address();
+            let unlocked = unlocked_balance(caller);
+            assert (unlocked > amount, 'INSUFFICIENT_UNLOCKED');
 
             let mut erc20_state = ERC20::unsafe_new_contract_state();
             ERC20::InternalImpl::_burn(ref erc20_state, caller, amount);
