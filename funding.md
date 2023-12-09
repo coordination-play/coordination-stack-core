@@ -9,7 +9,7 @@ Coordination-play offers funding tools for an organization to raise funds from i
 
 Many crypto native DAOs and projects that need to raise funds to fund their development are forced into inflexible standard VC contracts that do not fit well with the programmable onchain world. 
 
-We envision a richer set of programmable equyity primitives that allow onchain projects to sell ownership of the project while providing guarantees to investors. The first guarantee we have implemented is: 
+We envision a richer set of programmable equity primitives that allow onchain projects to sell ownership of the project while providing guarantees to investors. The first guarantee we have implemented is: 
 1. Spending conditions: Conditional spending of funds raised (tap streaming over x period, milestones, investor approval..etc)
 2. Withdrawability guarantees: Ability to redeem locked investment (burn tokens) if some x conditions are not met 
 
@@ -22,10 +22,15 @@ It is a venture stage funding contract called `Round`.
 
 A round is a finite funding requirement by the existing team and defines the following:
 1. Funding targets: Exact funding target, tokens on offer 
-2. Pricing Function: rising price curve (first come first serve) 
+2. Pricing Function: rising price curve (first come better price) 
 3. Governance rights: Voting rights on some issues
-4. Liquidity unlock conditions 
-5. Spending conditions 
+4. Exit conditions 
+5. Spending conditions
+6. Investor protections
+- token inflation
+- round down protections
+- conditions on future rounds
+
 
 note: A round in traditional startups is usually thought of as one of pre-seed, seed, series-A, series-B,..etc.
 
