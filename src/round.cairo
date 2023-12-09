@@ -5,6 +5,7 @@
 // use std::time::{SystemTime, UNIX_EPOCH};
 use starknet::ContractAddress;
 
+
 #[derive(Drop, Serde, starknet::Store)]
 struct Curve { // Curve eq = a * sqrt(x) + b
     a: u32,
@@ -66,6 +67,9 @@ mod Round {
 
     use super::Curve;
 
+    const PRECISION: u256 = 1000;
+
+
     #[derive(Drop, Serde, starknet::Store)]    
     enum RoundState {
         NOT_INITIALISED,
@@ -120,8 +124,8 @@ mod Round {
             self._token.write(token);
             self._end_timestamp.write(end_timestamp);
             self._total_shares.write(total_shares);
-            let b = final_price * initial_discount / 100;
-            let a = final_price - b / u256_sqrt(total_shares).into();
+            let b = (final_price * initial_discount * PRECISION) / 100;
+            let a = ((final_price * PRECISION) - b) / u256_sqrt(total_shares).into();
             let price_curve = Curve{a:a.try_into().unwrap(), b:b.try_into().unwrap()};
             self._price_curve.write(price_curve);
         }
@@ -145,7 +149,7 @@ mod Round {
 
             let avg_buying_price = get_price(price_curve.a, price_curve.b, shares_diluted, shares);
 
-            let amount_to_transfer = (avg_buying_price * shares) / 10000; // Price has a PRECISION 10000
+            let amount_to_transfer = (avg_buying_price * shares) / 10000000; // Price has a PRECISION 10000000
 
             // transfer token to contract
             let token = self._token.read();
