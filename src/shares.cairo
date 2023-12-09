@@ -6,6 +6,7 @@
 use starknet::ContractAddress;
 use array::Array;
 
+#[derive(Drop, Serde, starknet::Store)]
 struct LockedShare {
     amount: u256,
     unlock_time: u64
@@ -23,19 +24,27 @@ trait IShares<TContractState> {
     fn decimals(self: @TContractState) -> u8;
     fn balance_of(self: @TContractState, account: ContractAddress) -> u256;
     fn allowance(self: @TContractState, owner: ContractAddress, spender: ContractAddress) -> u256;
+    fn locked_balance(self: @TContractState, account: ContractAddress) -> u256;
+    fn unlocked_balance(self: @TContractState, account: ContractAddress) -> u256;
     // external functions
     fn transfer(ref self: TContractState, recipient: ContractAddress, amount: u256) -> bool;
     fn transfer_from(ref self: TContractState, sender: ContractAddress, recipient: ContractAddress, amount: u256) -> bool;
     fn approve(ref self: TContractState, spender: ContractAddress, amount: u256) -> bool;
     fn increase_allowance(ref self: TContractState, spender: ContractAddress, added_value: u256) -> bool;
     fn decrease_allowance(ref self: TContractState, spender: ContractAddress, subtracted_value: u256) -> bool;
-    fn issue_new_shares(ref self: TContractState, to: ContractAddress, amount: u256);
-    fn safe_burn(ref self: TContractState, to: ContractAddress) -> (u256, u256);
+    fn issue_new_shares(ref self: TContractState, to: ContractAddress, amount: u256, lock_duration: u64);
+    fn safe_burn(ref self: TContractState, amount: u256);
+    fn add_minter(ref self: TContractState, new_minter: ContractAddress);
 }
 
 #[starknet::contract]
-mod Share {
+mod Shares {
+    use coordination_stack_core::utils::erc20::ERC20;
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
+    use coordination_stack_core::access::ownable::{Ownable, IOwnable};
+    use coordination_stack_core::access::ownable::Ownable::{
+        ModifierTrait as OwnableModifierTrait, InternalTrait as OwnableInternalTrait,
+    };
     use super::LockedShare;
 
     //
@@ -64,7 +73,7 @@ mod Share {
     }
 
     #[external(v0)]
-    impl Share of super::IShare<ContractState> {
+    impl Shares of super::IShares<ContractState> {
 
         //
         // Getters ERC20
@@ -121,9 +130,9 @@ mod Share {
             // let total_balance = ERC20::ERC20::balance_of(@erc20_state, account);
             let mut locked = 0;
             let locks_len = self._locks_len.read(account);
-            let current_index = 0;
+            let mut current_index = 0;
             loop {
-                if (current_index == _locks_len) {
+                if (current_index == locks_len) {
                     break;
                 }
                 let lock = self._investors_locks.read((account,current_index));
@@ -131,14 +140,14 @@ mod Share {
                     locked += lock.amount;
                 }
                 current_index += 1;
-            }
+            };
             locked
         }
 
         fn unlocked_balance(self: @ContractState, account: ContractAddress) -> u256 {
             let erc20_state = ERC20::unsafe_new_contract_state();
             let total_balance = ERC20::ERC20::balance_of(@erc20_state, account);
-            let locked = locked_balance(account);
+            let locked = self.locked_balance(account);
             
             total_balance - locked
         }
@@ -154,7 +163,7 @@ mod Share {
         // @return success 0 or 1
         fn transfer(ref self: ContractState, recipient: ContractAddress, amount: u256) -> bool {
             let caller = get_caller_address();
-            let unlocked = unlocked_balance(caller);
+            let unlocked = self.unlocked_balance(caller);
             assert (unlocked > amount, 'INSUFFICIENT_UNLOCKED');
             let mut erc20_state = ERC20::unsafe_new_contract_state();
             ERC20::ERC20::transfer(ref erc20_state, recipient, amount);
@@ -168,7 +177,7 @@ mod Share {
         // @param amount Amount of tokens to transfer
         // @return success 0 or 1
         fn transfer_from(ref self: ContractState, sender: ContractAddress, recipient: ContractAddress, amount: u256) -> bool {
-            let unlocked = unlocked_balance(sender);
+            let unlocked = self.unlocked_balance(sender);
             assert (unlocked > amount, 'INSUFFICIENT_UNLOCKED');
             let mut erc20_state = ERC20::unsafe_new_contract_state();
             ERC20::ERC20::transfer_from(ref erc20_state, sender, recipient, amount);
@@ -218,21 +227,21 @@ mod Share {
         fn issue_new_shares(ref self: ContractState, to: ContractAddress, amount: u256, lock_duration: u64) {
             let caller = get_caller_address();
             let block_timestamp = get_block_timestamp();
-            assert(self._minters.read(caller) == true, "NO_POWER_TO_ISSUE");
+            assert(self._minters.read(caller) == true, 'NO_POWER_TO_ISSUE');
 
             let mut erc20_state = ERC20::unsafe_new_contract_state();
             ERC20::InternalImpl::_mint(ref erc20_state, to, amount);
 
             let new_lock = LockedShare{amount: amount, unlock_time: block_timestamp + lock_duration};
-            let locks_len = self._locks_len.read();
+            let locks_len = self._locks_len.read(to);
             self._investors_locks.write((to, locks_len), new_lock);
-            self._locks_len.write(locks_len + 1);
+            self._locks_len.write(to, locks_len + 1);
 
         }
 
         fn safe_burn(ref self: ContractState, amount: u256) {
             let caller = get_caller_address();
-            let unlocked = unlocked_balance(caller);
+            let unlocked = self.unlocked_balance(caller);
             assert (unlocked > amount, 'INSUFFICIENT_UNLOCKED');
 
             let mut erc20_state = ERC20::unsafe_new_contract_state();
