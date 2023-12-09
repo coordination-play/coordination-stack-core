@@ -52,8 +52,8 @@ trait IRound<TContractState> {
 #[starknet::contract]
 mod Round {
     use core::traits::TryInto;
-use core::traits::Into;
-use integer::u256_sqrt;
+    use core::traits::Into;
+    use integer::u256_sqrt;
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use super::{
         IERC20Dispatcher, IERC20DispatcherTrait, IShareDispatcher, IShareDispatcherTrait
@@ -84,7 +84,6 @@ use integer::u256_sqrt;
         _total_shares : u256, // total number of shares to be dilute
         _shares_diluted : u256, // number of shares left to be invested
         // current_valuation : u256, // current valuation of the company
-        _owner : ContractAddress, // the address of the owner of the organization
         _initialised: bool, // @dev Flag to store initialisation state
         _is_rounnd_private: bool, // flag to store if round is private.
         _whitelist : LegacyMap::<ContractAddress, u256>, // mapping of the whitelisted investors and the amount they can invest
@@ -103,7 +102,8 @@ use integer::u256_sqrt;
 
     #[constructor]
     fn constructor(ref self: ContractState, owner: ContractAddress) {
-        self._owner.write(owner);
+        let mut ownable_self = Ownable::unsafe_new_contract_state();
+        ownable_self._transfer_ownership(new_owner: owner);
         // self._shares_contract.write(shares_contract);
     }
  
@@ -131,10 +131,8 @@ use integer::u256_sqrt;
             let caller = get_caller_address();
             let contract_address = get_contract_address();
             let state = InternalImpl::_get_round_state(@self);
-            if (state != 1) {
-                return u256{ low:0, high :0};
-                // panic("Round is not Active");
-            }
+            assert (state == 1, 'ROUND_NOT_ACTIVE');
+
             let total_shares = self._total_shares.read();
             let shares_diluted = self._shares_diluted.read();
 
