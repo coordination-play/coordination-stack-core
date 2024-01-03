@@ -48,8 +48,23 @@ mod GuildSBT {
     use box::BoxTrait;
     use ecdsa::check_ecdsa_signature;
     use zeroable::Zeroable;
-    use openzeppelin::token::erc721::ERC721;
-    use openzeppelin::token::erc721::ERC721::InternalTrait as ERC721InternalTrait;
+    use openzeppelin::introspection::src5::SRC5Component;
+    use openzeppelin::token::erc721::ERC721Component;
+    use openzeppelin::access::ownable::OwnableComponent;
+
+    component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);    
+    component!(path: ERC721Component, storage: erc721_storage, event: ERC721Event);
+    component!(path: SRC5Component, storage: src5_storage, event: SRC5Event);
+
+    #[abi(embed_v0)]
+    impl ERC721Impl = ERC721Component::ERC721Impl<ContractState>;
+    impl ERC721MetadataImpl = ERC721Component::ERC721MetadataImpl<ContractState>;
+    impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
+    impl OwnableImpl = OwnableComponent::OwnableImpl<ContractState>;
+
+    impl ERC721InternalImpl = ERC721Component::InternalImpl<ContractState>;
+    impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
+
 
     use openzeppelin::introspection::interface::ISRC5;
     use openzeppelin::introspection::interface::ISRC5Camel;
@@ -70,9 +85,6 @@ mod GuildSBT {
         IMasterDispatcher, IMasterDispatcherTrait
     };
 
-    const IERC721_ID_LEGACY: felt252 = 0x80ac58cd;
-    const IERC721_METADATA_ID_LEGACY: felt252 = 0x5b5e139f;
-    const IERC721_RECEIVER_ID_LEGACY: felt252 = 0x150b7a02;
 
     #[storage]
     struct Storage {
@@ -82,6 +94,24 @@ mod GuildSBT {
         _token_type: LegacyMap::<ContractAddress, u8>,
         _next_token_id: u256,
         _wallet_of_owner: LegacyMap::<ContractAddress, u256>,
+        #[substorage(v0)]
+        erc721_storage: ERC721Component::Storage,
+        #[substorage(v0)]
+        src5_storage: SRC5Component::Storage,
+        #[substorage(v0)]
+        ownable_storage: OwnableComponent::Storage
+    }
+
+
+    #[event]
+    #[derive(Drop, starknet::Event)]
+    enum Event {
+        #[flat]
+        ERC721Event: ERC721Component::Event,
+        #[flat]
+        SRC5Event: SRC5Component::Event,
+        #[flat]
+        OwnableEvent: OwnableComponent::Event
     }
 
     //
@@ -91,11 +121,8 @@ mod GuildSBT {
     // @notice Contract constructor
     #[constructor]
     fn constructor(ref self: ContractState, name_: felt252, symbol_: felt252, baseURI_: Span<felt252>, owner_: ContractAddress, master_: ContractAddress, contribution_levels_: Array<u32>) {
-        let mut erc721_self = ERC721::unsafe_new_contract_state();
-        erc721_self.initializer(name: name_, symbol: symbol_);
-
-        let mut ownable_self = Ownable::unsafe_new_contract_state();
-        ownable_self._transfer_ownership(new_owner: owner_);
+        self.erc721_storage.initializer(name: name_, symbol: symbol_);
+        self.ownable_storage.initializer(owner);
 
         self._baseURI.write(baseURI_);
         self._master.write(master_);
@@ -109,8 +136,7 @@ mod GuildSBT {
         // Getters
         //
         fn tokenURI(self: @ContractState, token_id: u256) -> Span<felt252> {
-            let erc721_self = ERC721::unsafe_new_contract_state();
-            let owner = erc721_self.owner_of(:token_id);
+            let owner = self.erc721_storage.owner_of(:token_id);
             let master = self._master.read();
             let masterDispatcher = IMasterDispatcher { contract_address: master };
             // @notice this is a sample SBT contract for dev guild, update the next line before deploying other guild
@@ -178,25 +204,24 @@ mod GuildSBT {
         //
 
         fn update_baseURI(ref self: ContractState, new_baseURI: Span<felt252>) {
-            self._only_owner();
+            self.ownable_storage.assert_only_owner();
             self._baseURI.write(new_baseURI);
         }
 
         fn update_contribution_levels(ref self: ContractState, new_conribution_levels: Array<u32>) {
-            self._only_owner();
+            self.ownable_storage.assert_only_owner();
             InternalImpl::_update_contribution_levels(ref self, new_conribution_levels);
 
         }
         fn update_master(ref self: ContractState, new_master: ContractAddress) {
-            self._only_owner();
+            self.ownable_storage.assert_only_owner();
             self._master.write(new_master);
         }
 
         fn safe_mint(ref self: ContractState, token_type: u8) {
             let account = get_caller_address();
-            let mut erc721_self = ERC721::unsafe_new_contract_state();
 
-            let balance = erc721_self.balance_of(:account);
+            let balance = self.erc721_storage.balance_of(:account);
             assert (balance == 0, 'ALREADY_MINTED');
 
             let master = self._master.read();
@@ -207,7 +232,7 @@ mod GuildSBT {
             assert (tier != 0, 'NOT_ENOUGH_POINTS');
             self._token_type.write(account, token_type);
             let token_id = self._next_token_id.read();
-            erc721_self._mint(to: account, token_id: token_id.into());
+            self.erc721_storage._mint(to: account, token_id: token_id.into());
             self._wallet_of_owner.write(account, token_id);
             self._next_token_id.write(token_id + 1);
 
@@ -215,20 +240,19 @@ mod GuildSBT {
 
         fn migrate_sbt(ref self: ContractState, old_address: ContractAddress, new_address: ContractAddress) {
             self._only_master();
-            let mut erc721_self = ERC721::unsafe_new_contract_state();
 
-            let old_address_balance = erc721_self.balance_of(account: old_address);
+            let old_address_balance = self.erc721_storage.balance_of(account: old_address);
             if (old_address_balance == 0) {
                 return ();
             }
 
-            let new_address_balance = erc721_self.balance_of(account: new_address);
+            let new_address_balance = self.erc721_storage.balance_of(account: new_address);
             assert (new_address_balance == 0, 'SBT_ALREADY_FOUND');
 
             let token_id = self._wallet_of_owner.read(old_address);
             let token_type = self._token_type.read(old_address);
 
-            erc721_self._transfer(from: old_address, to: new_address, :token_id);
+            self.erc721_storage._transfer(from: old_address, to: new_address, :token_id);
 
             self._wallet_of_owner.write(old_address, 0);
             self._wallet_of_owner.write(new_address, token_id);
@@ -246,7 +270,7 @@ mod GuildSBT {
         }
 
         fn _get_contribution_tier(self: @ContractState, points: u32) -> u32 {
-            let mut current_index = 0_u32;
+            let mut current_index = 0;
             let contribution_levels = self._contribution_levels.read();
             loop {
                 if (current_index == contribution_levels.len()) {
@@ -297,201 +321,6 @@ mod GuildSBT {
                 uri.append(*tmpArray.get(i.into()).unwrap().unbox());
             };
             return uri;
-        }
-    }
-    
-
-    //
-    // ERC721 ABI impl
-    //
-
-    #[external(v0)]
-    impl IERC721Impl of IERC721<ContractState> {
-        fn balance_of(self: @ContractState, account: ContractAddress) -> u256 {
-            let erc721_self = ERC721::unsafe_new_contract_state();
-
-            erc721_self.balance_of(:account)
-        }
-
-        fn owner_of(self: @ContractState, token_id: u256) -> ContractAddress {
-            let erc721_self = ERC721::unsafe_new_contract_state();
-
-            erc721_self.owner_of(:token_id)
-        }
-
-        fn get_approved(self: @ContractState, token_id: u256) -> ContractAddress {
-            let erc721_self = ERC721::unsafe_new_contract_state();
-
-            erc721_self.get_approved(:token_id)
-        }
-
-        fn is_approved_for_all(
-            self: @ContractState, owner: ContractAddress, operator: ContractAddress
-        ) -> bool {
-            let erc721_self = ERC721::unsafe_new_contract_state();
-
-            erc721_self.is_approved_for_all(:owner, :operator)
-        }
-
-        fn approve(ref self: ContractState, to: ContractAddress, token_id: u256) {
-            let mut erc721_self = ERC721::unsafe_new_contract_state();
-
-            erc721_self.approve(:to, :token_id);
-        }
-
-        fn transfer_from(
-            ref self: ContractState, from: ContractAddress, to: ContractAddress, token_id: u256
-        ) {
-            assert(false, 'SBT_NOT_TRANSFERABLE');
-            // let mut erc721_self = ERC721::unsafe_new_contract_state();
-
-            // erc721_self.transfer_from(:from, :to, :token_id);
-        }
-
-        fn safe_transfer_from(
-            ref self: ContractState,
-            from: ContractAddress,
-            to: ContractAddress,
-            token_id: u256,
-            data: Span<felt252>
-        ) {
-            assert(false, 'SBT_NOT_TRANSFERABLE');
-
-            // let mut erc721_self = ERC721::unsafe_new_contract_state();
-
-            // erc721_self.safe_transfer_from(:from, :to, :token_id, :data);
-        }
-
-        fn set_approval_for_all(
-            ref self: ContractState, operator: ContractAddress, approved: bool
-        ) {
-            let mut erc721_self = ERC721::unsafe_new_contract_state();
-
-            erc721_self.set_approval_for_all(:operator, :approved);
-        }
-    }
-
-    #[external(v0)]
-    impl ISRC5Impl of ISRC5<ContractState> {
-        fn supports_interface(self: @ContractState, interface_id: felt252) -> bool {
-            if ((interface_id == IERC721_ID_LEGACY)
-                | (interface_id == IERC721_METADATA_ID_LEGACY)) {
-                true
-            } else {
-                let mut erc721_self = ERC721::unsafe_new_contract_state();
-                erc721_self.supports_interface(:interface_id)
-            }
-        }
-    }
-
-    #[external(v0)]
-    impl ISRC5CamelImpl of ISRC5Camel<ContractState> {
-        fn supportsInterface(self: @ContractState, interfaceId: felt252) -> bool {
-            self.supports_interface(interface_id: interfaceId)
-        }
-    }
-
-    #[external(v0)]
-    impl IERC721MetadataImpl of IERC721Metadata<ContractState> {
-        fn name(self: @ContractState) -> felt252 {
-            let erc721_self = ERC721::unsafe_new_contract_state();
-
-            erc721_self.name()
-        }
-
-        fn symbol(self: @ContractState) -> felt252 {
-            let erc721_self = ERC721::unsafe_new_contract_state();
-
-            erc721_self.symbol()
-        }
-
-        fn token_uri(self: @ContractState, token_id: u256) -> felt252 {
-            let erc721_self = ERC721::unsafe_new_contract_state();
-
-            erc721_self.token_uri(:token_id)
-        }
-    }
-
-    #[external(v0)]
-    impl JediERC721CamelImpl of IERC721CamelOnly<ContractState> {
-        fn balanceOf(self: @ContractState, account: ContractAddress) -> u256 {
-            IERC721::balance_of(self, account: account)
-        }
-
-        fn ownerOf(self: @ContractState, tokenId: u256) -> ContractAddress {
-            IERC721::owner_of(self, token_id: tokenId)
-        }
-
-        fn getApproved(self: @ContractState, tokenId: u256) -> ContractAddress {
-            IERC721::get_approved(self, token_id: tokenId)
-        }
-
-        fn isApprovedForAll(
-            self: @ContractState, owner: ContractAddress, operator: ContractAddress
-        ) -> bool {
-            IERC721::is_approved_for_all(self, owner: owner, operator: operator)
-        }
-
-        fn transferFrom(
-            ref self: ContractState, from: ContractAddress, to: ContractAddress, tokenId: u256
-        ) {
-            assert(false, 'SBT_NOT_TRANSFERABLE');
-
-            // IERC721::transfer_from(ref self, :from, :to, token_id: tokenId);
-        }
-
-        fn safeTransferFrom(
-            ref self: ContractState,
-            from: ContractAddress,
-            to: ContractAddress,
-            tokenId: u256,
-            data: Span<felt252>
-        ) {
-            assert(false, 'SBT_NOT_TRANSFERABLE');
-
-            // IERC721::safe_transfer_from(ref self, :from, :to, token_id: tokenId, :data);
-        }
-
-        fn setApprovalForAll(ref self: ContractState, operator: ContractAddress, approved: bool) {
-            IERC721::set_approval_for_all(ref self, :operator, :approved);
-        }
-    }
-
-
-    #[generate_trait]
-    impl ModifierImpl of ModifierTrait {
-        fn _only_owner(self: @ContractState) {
-            let mut ownable_self = Ownable::unsafe_new_contract_state();
-
-            ownable_self.assert_only_owner();
-        }
-
-        fn _only_master(self: @ContractState) {
-            let master = self._master.read();
-            let caller = get_caller_address();
-            assert(!caller.is_zero(), 'CALLER_IS_ZERO_ADDRESS');
-            assert (caller == master, 'UNAUTHORISED')
-        }
-    }
-
-    #[external(v0)]
-    impl IOwnableImpl of IOwnable<ContractState> {
-        fn owner(self: @ContractState) -> ContractAddress {
-            let ownable_self = Ownable::unsafe_new_contract_state();
-
-            ownable_self.owner()
-        }
-
-        fn transfer_ownership(ref self: ContractState, new_owner: ContractAddress) {
-            let mut ownable_self = Ownable::unsafe_new_contract_state();
-
-            ownable_self.transfer_ownership(:new_owner);
-        }
-
-        fn renounce_ownership(ref self: ContractState) {
-            let mut ownable_self = Ownable::unsafe_new_contract_state();
-
-            ownable_self.renounce_ownership();
         }
     }
 

@@ -70,20 +70,26 @@ mod Attribution {
     use result::ResultTrait;
     use zeroable::Zeroable;
     use hash::LegacyHash;
-    use coordination_stack_core::access::ownable::{Ownable, IOwnable};
-    use coordination_stack_core::access::ownable::Ownable::{
-        ModifierTrait as OwnableModifierTrait, InternalTrait as OwnableInternalTrait,
-    };
+    // use coordination_stack_core::access::ownable::{Ownable, IOwnable};
+    // use coordination_stack_core::access::ownable::Ownable::{
+    //     ModifierTrait as OwnableModifierTrait, InternalTrait as OwnableInternalTrait,
+    // };
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use integer::{u128_try_from_felt252, u256_sqrt, u256_from_felt252};
     use starknet::syscalls::{replace_class_syscall, call_contract_syscall};
     use coordination_stack_core::array_storage::StoreFelt252Array;
     use coordination_stack_core::array_storage::StoreU32Array;
 
-    use super::{Contribution, MonthlyContribution};
-    use super::{
-        IGuildDispatcher, IGuildDispatcherTrait
-    };
+    use super::{Contribution, MonthlyContribution, IGuildDispatcher, IGuildDispatcherTrait};
+
+    use openzeppelin::access::ownable::OwnableComponent;
+
+    component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);
+
+    #[abi(embed_v0)]
+    impl OwnableImpl = OwnableComponent::OwnableImpl<ContractState>;
+    
+    impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
 
 
     //
@@ -100,6 +106,8 @@ mod Attribution {
         _guild_SBT: LegacyMap::<felt252, ContractAddress>, // @dev contract address for guild SBTs
         _initialised: bool, // @dev Flag to store initialisation state
         _queued_migrations: LegacyMap::<felt252, bool>, // @dev flag to store queued migration requests.
+        #[substorage(v0)]
+        ownable_storage: OwnableComponent::Storage
     }
 
     #[event]
@@ -108,6 +116,8 @@ mod Attribution {
         ContributionUpdated: ContributionUpdated,
         MigrationQueued: MigrationQueued,
         Migrated: Migrated,
+        #[flat]
+        OwnableEvent: OwnableComponent::Event
     }
 
     // @notice An event emitted whenever contribution is updated
@@ -147,8 +157,7 @@ mod Attribution {
         self._last_update_time.write(0_u64);
         self._initialised.write(false);
 
-        let mut ownable_self = Ownable::unsafe_new_contract_state();
-        ownable_self._transfer_ownership(new_owner: owner_);
+        self.ownable_storage.initializer(owner_)
 
     }
 
@@ -222,7 +231,7 @@ mod Attribution {
         //
 
         fn initialise(ref self: ContractState, guilds_name: Array::<felt252>, guilds_address: Array::<ContractAddress>) {
-            self._only_owner();
+            self.ownable_storage.assert_only_owner();
             let is_initialised = self._initialised.read();
             assert (is_initialised == false, 'ALREADY_INITIALISED');
             self._guilds.write(guilds_name.clone());
@@ -239,7 +248,7 @@ mod Attribution {
         }
 
         fn update_contibutions(ref self: ContractState, month_id: u32, guild: felt252, contributions: Array::<MonthlyContribution>) {
-            self._only_owner();
+            self.ownable_storage.assert_only_owner();
             let block_timestamp = get_block_timestamp();
             let mut id = self._last_update_id.read();
             let mut current_index = 0;
@@ -276,7 +285,7 @@ mod Attribution {
         }
 
         fn add_guild(ref self: ContractState, guild_name: felt252, guild_address: ContractAddress) {
-            self._only_owner();
+            self.ownable_storage.assert_only_owner();
             let mut guilds = self._guilds.read();
             guilds.append(guild_name);
             self._guilds.write(guilds);
@@ -285,7 +294,7 @@ mod Attribution {
 
 
         fn migrate_points_initiated_by_DAO(ref self: ContractState, old_addresses: Array::<ContractAddress>, new_addresses: Array::<ContractAddress> ) {
-            self._only_owner();
+            self.ownable_storage.assert_only_owner();
             assert(old_addresses.len() == new_addresses.len(), 'INVALID_INPUTS');
             let mut current_index = 0;
 
@@ -313,7 +322,7 @@ mod Attribution {
 
         // @Notice the function has only_owner modifier to prevent user to use this function to tranfer SBT anytime.
         fn execute_migrate_points_initiated_by_holder(ref self: ContractState, old_address: ContractAddress, new_address: ContractAddress) {
-            self._only_owner();
+            self.ownable_storage.assert_only_owner();
             let migration_hash: felt252 = LegacyHash::hash(old_address.into(), new_address);
             let is_queued = self._queued_migrations.read(migration_hash);
 
@@ -382,40 +391,7 @@ mod Attribution {
             guildDispatcher.migrate_sbt(old_address, new_address);
         }
 
-    }
-
-
-    #[generate_trait]
-    impl ModifierImpl of ModifierTrait {
-        fn _only_owner(self: @ContractState) {
-            let mut ownable_self = Ownable::unsafe_new_contract_state();
-
-            ownable_self.assert_only_owner();
-        }
-    }
-
-    #[external(v0)]
-    impl IOwnableImpl of IOwnable<ContractState> {
-        fn owner(self: @ContractState) -> ContractAddress {
-            let ownable_self = Ownable::unsafe_new_contract_state();
-
-            ownable_self.owner()
-        }
-
-        fn transfer_ownership(ref self: ContractState, new_owner: ContractAddress) {
-            let mut ownable_self = Ownable::unsafe_new_contract_state();
-
-            ownable_self.transfer_ownership(:new_owner);
-        }
-
-        fn renounce_ownership(ref self: ContractState) {
-            let mut ownable_self = Ownable::unsafe_new_contract_state();
-
-            ownable_self.renounce_ownership();
-        }
-    }
-
- 
+    } 
 
 }
 
