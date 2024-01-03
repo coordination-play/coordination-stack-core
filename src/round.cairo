@@ -33,7 +33,7 @@ trait IShare<T> {
     fn transfer(ref self: T, recipient: ContractAddress, amount: u256) -> bool;
     fn transfer_from(ref self: T, sender: ContractAddress, recipient: ContractAddress, amount: u256
     ) -> bool;
-    fn issue_new_shares(ref self: T, recipient: ContractAddress, amount: u256) -> bool;
+    fn issue_new_shares(ref self: T, recipient: ContractAddress, amount: u256, lock_duration: u64);
 
 }
 
@@ -41,8 +41,13 @@ trait IShare<T> {
 #[starknet::interface]
 trait IRound<TContractState> {
 
+    fn amount_raised(self: @TContractState) -> u256;
+    fn shares_committed(self: @TContractState) -> u256;
+    fn get_round_state(self: @TContractState) -> u32;
+    fn get_avg_price(self: @TContractState, total_shares_committed: u256, shares:u256 ) -> u256;
+    fn is_round_whitelisted(self: @TContractState) -> bool;
     // initiate the funding for the organization, the funding with upgrade to next round if called again
-    fn initialize_round(ref self: TContractState, end_timestamp: u256, round_amount: u256, token: ContractAddress, total_shares: u256, final_price: u256, initial_discount: u256, threshold: u256, is_whitelisted: bool, whitelist_addresses: Array::<ContractAddress>, whitelist_amounts: Array::<u256> );
+    fn initialize_round(ref self: TContractState, end_timestamp: u256, round_amount: u256, token: ContractAddress, shares_contract:ContractAddress, total_shares: u256, final_price: u256, initial_discount: u256, threshold: u256, is_whitelisted: bool, whitelist_addresses: Array::<ContractAddress>, whitelist_amounts: Array::<u256>, lock_duration: u64, treasury: ContractAddress);
 
     // invent in the organization
     fn invest(ref self: TContractState, number_of_shares: u256) -> u256;
@@ -86,7 +91,7 @@ mod Round {
         _shares_contract: ContractAddress, // erc20 token contract for organisation shares
         _round_amount : u256, // the amount of funding company need to invest for that round
         _investors : Array<ContractAddress>, // list of all the investors address
-        _token : ContractAddress, // address of ERC20 token to receive in fundind.
+        _token : ContractAddress, // address of ERC20 token to receive in funding.
         _end_timestamp : u256, // end timestamp of the funding round in seconds 
         _amount_raised : u256, // the total amount raised in the round so far
         _amount_invested : LegacyMap::<ContractAddress, u256>, // the amount of funds by each investor.
@@ -101,6 +106,7 @@ mod Round {
         _is_finalised: bool, // flag to store finanlised state.
         _is_discarded: bool, // flag to store discarded state.
         _treasury: ContractAddress, // address to transfer funds to 
+        _lock_duration: u64, // time in seconds for which new shares allocated are locked
 
     }
 
@@ -114,17 +120,40 @@ mod Round {
     //   }
 
     #[constructor]
-    fn constructor(ref self: ContractState, owner: ContractAddress, shares_contract: ContractAddress) {
+    fn constructor(ref self: ContractState, owner: ContractAddress) {
         let mut ownable_self = Ownable::unsafe_new_contract_state();
         ownable_self._transfer_ownership(new_owner: owner);
-        self._shares_contract.write(shares_contract);
+        
     }
  
     #[external(v0)]
     impl Round of super::IRound<ContractState> {
+
+        fn amount_raised(self: @ContractState) -> u256 {
+            self._amount_raised.read()
+        }
+
+        fn shares_committed(self: @ContractState) -> u256 {
+            self._total_shares_committed.read()
+        }
+
+        fn get_round_state(self: @ContractState) -> u32 {
+            InternalImpl::_get_round_state(self)
+        }
+
+        fn get_avg_price(self: @ContractState, total_shares_committed: u256, shares:u256 ) -> u256 {
+            let price_curve = self._price_curve.read();
+
+            get_price(price_curve.a, price_curve.b, total_shares_committed, shares)
+
+        }
+
+        fn is_round_whitelisted(self: @ContractState) -> bool {
+            self._is_round_whitelisted.read()
+        }
         
         // intialise the funding round
-        fn initialize_round(ref self: ContractState, end_timestamp: u256, round_amount: u256, token: ContractAddress, total_shares: u256, final_price: u256, initial_discount: u256, threshold: u256, is_whitelisted: bool, whitelist_addresses: Array::<ContractAddress>, whitelist_amounts: Array::<u256> ) {
+        fn initialize_round(ref self: ContractState, end_timestamp: u256, round_amount: u256, token: ContractAddress, shares_contract:ContractAddress, total_shares: u256, final_price: u256, initial_discount: u256, threshold: u256, is_whitelisted: bool, whitelist_addresses: Array::<ContractAddress>, whitelist_amounts: Array::<u256>, lock_duration: u64, treasury: ContractAddress ) {
             self._only_owner();
             let is_initialised = self._initialised.read();
             assert (is_initialised == false, 'ALREADY_INITIALISED');
@@ -133,9 +162,12 @@ mod Round {
 
             self._round_amount.write(round_amount);
             self._token.write(token);
+            self._shares_contract.write(shares_contract);
             self._end_timestamp.write(end_timestamp);
             self._total_shares.write(total_shares);
             self._threshold.write(threshold);
+            self._lock_duration.write(lock_duration);
+            self._treasury.write(treasury);
             self._is_round_whitelisted.write(is_whitelisted);
             // TODO: if whitelisted, loop through whitelist array and update amount.
             if (is_whitelisted) {
@@ -152,6 +184,8 @@ mod Round {
             let a = ((final_price * PRECISION) - b) / u256_sqrt(total_shares).into();
             let price_curve = Curve{a:a.try_into().unwrap(), b:b.try_into().unwrap()};
             self._price_curve.write(price_curve);
+
+            self._initialised.write(true);
         }
 
 
@@ -180,7 +214,7 @@ mod Round {
 
             let avg_buying_price = get_price(price_curve.a, price_curve.b, total_shares_committed, shares);
 
-            let amount_to_transfer = (avg_buying_price * shares) / 10000000; // Price has a PRECISION 10000000
+            let amount_to_transfer = (avg_buying_price * shares * 1000000000000000000)  / 10000000; // Price has a PRECISION 10000000
 
             // transfer token to contract
             let token = self._token.read();
@@ -241,8 +275,9 @@ mod Round {
                     }
                     let shares_committed = self._shares_committed.read(*investors[current_index]);
                     let share_contract = self._shares_contract.read();
+                    let lock_duration = self._lock_duration.read();
                     let shareDispatcher = IShareDispatcher { contract_address: share_contract };
-                    shareDispatcher.issue_new_shares(*investors[current_index], shares_committed);
+                    shareDispatcher.issue_new_shares(*investors[current_index], shares_committed * 1000000000000000000, lock_duration);
                     current_index += 1;
                 };
 
