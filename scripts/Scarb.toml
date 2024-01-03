@@ -1,0 +1,16 @@
+[package]
+name = "scripts"
+version = "0.1.0"
+
+[lib]
+sierra = true
+casm = true
+
+[[target.starknet-contract]]
+sierra = true
+casm = true
+
+[dependencies]
+starknet = "2.4.1"
+sncast_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v0.13.1" }
+coordination_stack_core = {path = "../"}
