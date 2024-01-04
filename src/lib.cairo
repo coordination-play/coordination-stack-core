@@ -2,7 +2,7 @@
 // mod array_storage;
 // mod span_storage;
 // mod utils;
-// mod attribution;
+// mod organisation;
 // mod guildSBT;
 // mod round;
 // mod shares;

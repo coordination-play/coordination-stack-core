@@ -8,7 +8,7 @@ use array::Array;
 
 
 #[starknet::interface]
-trait IMaster<T> {
+trait IOrganisation<T> {
     fn get_guild_points(self: @T, contributor: ContractAddress, guild: felt252) -> u32;
 }
 
@@ -20,7 +20,7 @@ trait IGuildSBT<TContractState> {
     // view functions
     fn tokenURI(self: @TContractState, token_id: u256) -> Span<felt252>;
     fn tokenURI_from_contributor(self: @TContractState, contributor: ContractAddress) -> Span<felt252>;
-    fn get_master(self: @TContractState) -> ContractAddress;
+    fn get_organisation(self: @TContractState) -> ContractAddress;
     fn get_next_token_id(self: @TContractState) -> u256;
     fn get_contribution_tier(self: @TContractState, contributor: ContractAddress) -> u32;
     fn get_contribution_levels(self: @TContractState) -> Array<u32>;
@@ -31,7 +31,7 @@ trait IGuildSBT<TContractState> {
     // external functions
     fn update_baseURI(ref self: TContractState, new_baseURI: Span<felt252>);
     fn update_contribution_levels(ref self: TContractState, new_conribution_levels: Array<u32>);
-    fn update_master(ref self: TContractState, new_master: ContractAddress);
+    fn update_organisation(ref self: TContractState, new_organisation: ContractAddress);
     fn safe_mint(ref self: TContractState, token_type: u8);
     fn migrate_sbt(ref self: TContractState, old_address: ContractAddress, new_address: ContractAddress);
 
@@ -82,13 +82,13 @@ mod GuildSBT {
     use coordination_stack_core::span_storage::StoreSpanFelt252;
     use coordination_stack_core::array_storage::StoreU32Array;
     use super::{
-        IMasterDispatcher, IMasterDispatcherTrait
+        IOrganisationDispatcher, IOrganisationDispatcherTrait
     };
 
 
     #[storage]
     struct Storage {
-        _master: ContractAddress,
+        _organisation: ContractAddress,
         _contribution_levels: Array<u32>,
         _baseURI: Span<felt252>,
         _token_type: LegacyMap::<ContractAddress, u8>,
@@ -120,12 +120,12 @@ mod GuildSBT {
 
     // @notice Contract constructor
     #[constructor]
-    fn constructor(ref self: ContractState, name_: felt252, symbol_: felt252, baseURI_: Span<felt252>, owner_: ContractAddress, master_: ContractAddress, contribution_levels_: Array<u32>) {
+    fn constructor(ref self: ContractState, name_: felt252, symbol_: felt252, baseURI_: Span<felt252>, owner_: ContractAddress, organisation_: ContractAddress, contribution_levels_: Array<u32>) {
         self.erc721_storage.initializer(name: name_, symbol: symbol_);
         self.ownable_storage.initializer(owner);
 
         self._baseURI.write(baseURI_);
-        self._master.write(master_);
+        self._organisation.write(organisation_);
         self._next_token_id.write(1);
         InternalImpl::_update_contribution_levels(ref self, contribution_levels_);
     }
@@ -137,10 +137,10 @@ mod GuildSBT {
         //
         fn tokenURI(self: @ContractState, token_id: u256) -> Span<felt252> {
             let owner = self.erc721_storage.owner_of(:token_id);
-            let master = self._master.read();
-            let masterDispatcher = IMasterDispatcher { contract_address: master };
+            let organisation = self._organisation.read();
+            let organisationDispatcher = IOrganisatioDispatcher { contract_address: organisation };
             // @notice this is a sample SBT contract for dev guild, update the next line before deploying other guild
-            let points = masterDispatcher.get_guild_points(owner, 'dev');
+            let points = organisationDispatcher.get_guild_points(owner, 'dev');
             let token_type = self._token_type.read(owner);
 
             let tier = InternalImpl::_get_contribution_tier(self, points);
@@ -152,10 +152,10 @@ mod GuildSBT {
 
 
         fn tokenURI_from_contributor(self: @ContractState, contributor: ContractAddress) -> Span<felt252> {
-            let master = self._master.read();
-            let masterDispatcher = IMasterDispatcher { contract_address: master };
+            let organisation = self._organisation.read();
+            let organisationDispatcher = IOrganisationDispatcher { contract_address: organisation };
             // @notice this is a sample SBT contract for dev guild, update the next line before deploying other guild
-            let points = masterDispatcher.get_guild_points(contributor, 'dev');
+            let points = organisationDispatcher.get_guild_points(contributor, 'dev');
             let token_type = self._token_type.read(contributor);
 
             let tier = InternalImpl::_get_contribution_tier(self, points);
@@ -165,8 +165,8 @@ mod GuildSBT {
         }
 
 
-        fn get_master(self: @ContractState) -> ContractAddress {
-            self._master.read()
+        fn get_organisation(self: @ContractState) -> ContractAddress {
+            self._organisation.read()
         }
 
         fn get_next_token_id(self: @ContractState) -> u256 {
@@ -175,9 +175,9 @@ mod GuildSBT {
 
 
         fn get_contribution_tier(self: @ContractState, contributor: ContractAddress) -> u32 {
-            let master = self._master.read();
-            let masterDispatcher = IMasterDispatcher { contract_address: master };
-            let points = masterDispatcher.get_guild_points(contributor, 'dev');
+            let organisation = self._organisation.read();
+            let organisationDispatcher = IOrganisationDispatcher { contract_address: organisation };
+            let points = organisationDispatcher.get_guild_points(contributor, 'dev');
             InternalImpl::_get_contribution_tier(self, points)
         }
 
@@ -213,9 +213,9 @@ mod GuildSBT {
             InternalImpl::_update_contribution_levels(ref self, new_conribution_levels);
 
         }
-        fn update_master(ref self: ContractState, new_master: ContractAddress) {
+        fn update_organisation(ref self: ContractState, new_organisation: ContractAddress) {
             self.ownable_storage.assert_only_owner();
-            self._master.write(new_master);
+            self._organisation.write(new_organisation);
         }
 
         fn safe_mint(ref self: ContractState, token_type: u8) {
@@ -224,9 +224,9 @@ mod GuildSBT {
             let balance = self.erc721_storage.balance_of(:account);
             assert (balance == 0, 'ALREADY_MINTED');
 
-            let master = self._master.read();
-            let masterDispatcher = IMasterDispatcher { contract_address: master };
-            let points = masterDispatcher.get_guild_points(account, 'dev');
+            let organisation = self._organisation.read();
+            let organisationDispatcher = IOrganisationDispatcher { contract_address: organisation };
+            let points = organisationDispatcher.get_guild_points(account, 'dev');
             let tier = InternalImpl::_get_contribution_tier(@self, points);
 
             assert (tier != 0, 'NOT_ENOUGH_POINTS');
@@ -239,7 +239,7 @@ mod GuildSBT {
         }
 
         fn migrate_sbt(ref self: ContractState, old_address: ContractAddress, new_address: ContractAddress) {
-            self._only_master();
+            self._only_organisation();
 
             let old_address_balance = self.erc721_storage.balance_of(account: old_address);
             if (old_address_balance == 0) {

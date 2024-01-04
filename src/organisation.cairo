@@ -1,7 +1,7 @@
-// @title Mesh Contributor SBTs Attribution Cairo 2.2
+// @title Coordination-stack Organisation in Cairo 2.4.1
 // @author Mesh Finance
 // @license MIT
-// @notice Attribution to store contribution points
+// @notice Organisation, main contract for each org and to store contribution points
 
 use starknet::ContractAddress;
 use array::Array;
@@ -38,7 +38,7 @@ trait IGuild<T> {
 // Contract Interface
 //
 #[starknet::interface]
-trait IAttribution<TContractState> {
+trait IOrganisation<TContractState> {
     // view functions
     fn get_contributions_points(self: @TContractState, contributor: ContractAddress) -> Array<Contribution>;
     fn get_guild_points(self: @TContractState, contributor: ContractAddress, guild: felt252) -> u32;
@@ -63,17 +63,13 @@ trait IAttribution<TContractState> {
 
 
 #[starknet::contract]
-mod Attribution {
+mod Organisation {
     use traits::Into; // TODO remove intos when u256 inferred type is available
     use option::OptionTrait;
     use array::{ArrayTrait, SpanTrait};
     use result::ResultTrait;
     use zeroable::Zeroable;
     use hash::LegacyHash;
-    // use coordination_stack_core::access::ownable::{Ownable, IOwnable};
-    // use coordination_stack_core::access::ownable::Ownable::{
-    //     ModifierTrait as OwnableModifierTrait, InternalTrait as OwnableInternalTrait,
-    // };
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use integer::{u128_try_from_felt252, u256_sqrt, u256_from_felt252};
     use starknet::syscalls::{replace_class_syscall, call_contract_syscall};
@@ -93,7 +89,7 @@ mod Attribution {
 
 
     //
-    // Storage Attribution
+    // Storage Organisation
     //
     #[storage]
     struct Storage {
@@ -162,7 +158,7 @@ mod Attribution {
     }
 
     #[external(v0)]
-    impl Attribution of super::IAttribution<ContractState> {
+    impl Organisation of super::IOrganisation<ContractState> {
         //
         // Getters
         //
