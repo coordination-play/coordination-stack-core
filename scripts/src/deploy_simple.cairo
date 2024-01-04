@@ -1,15 +1,15 @@
 use sncast_std::{
-    declare, deploy, invoke, call, DeclareResult, DeployResult, InvokeResult, CallResult
+    declare, deploy, invoke, call, DeclareResult, DeployResult, InvokeResult, CallResult, get_nonce
 };
 use starknet::{ ContractAddress, ClassHash };
 use debug::PrintTrait;
 use scripts::utils::{owner};
 
 fn main() {
-    let max_fee = 9999999999999999;
+    let max_fee = 9999999;
     let salt = 0x6;
-    let nonce = 0x1;
-
+    let nonce = get_nonce('latest');
+    nonce.print();
 
     let simple_declare_result = declare('Simple', Option::Some(max_fee), Option::None);
     let simple_class_hash = simple_declare_result.class_hash;
