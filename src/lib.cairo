@@ -2,6 +2,7 @@
 mod array_storage;
 mod span_storage;
 mod utils;
+mod factory;
 mod organisation;
 mod guild;
 mod salary;
