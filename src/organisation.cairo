@@ -5,32 +5,25 @@
 
 use starknet::ContractAddress;
 use array::Array;
-
-
-#[derive(Drop, Serde, starknet::Store)]
-struct Contribution {
-    // @notice cummulative Contribution points for each guild
-    cum_point: u32,
-    // @notice timestamp for the last update
-    last_timestamp: u64
-}
-
-#[derive(Copy, Drop, Serde, starknet::Store)]
-struct MonthlyContribution {
-    // @notice Contributor Address, used in update_contribution function
-    contributor: ContractAddress,
-    // @notice Contribution for guilds
-    point: u32,
-}
-
+use starknet::ClassHash;
 
 //
 // External Interfaces
 //
 
 #[starknet::interface]
-trait IGuild<T> {
-    fn migrate_sbt(ref self: T, old_address: ContractAddress, new_address: ContractAddress);
+trait IGuild<TContractState> {
+    fn get_cum_contributions_points(self: @TContractState, contributor: ContractAddress) -> u32;
+    fn get_monthly_total_contribution(self: @TContractState, month_id: u32) -> u32;
+    fn get_contributions_data(self: @TContractState, contributor: ContractAddress) -> Array<u32>;
+    fn get_monthly_contribution_points(self: @TContractState, contributor: ContractAddress, month_id: u32) -> u32;
+
+    fn migrate_points(ref self: TContractState, old_address: ContractAddress, new_address: ContractAddress);
+}
+
+#[starknet::interface]
+trait IFactory<TContractState> {
+    fn get_guild_contract_class_hash(self: @TContractState) -> ClassHash;
 }
 
 
@@ -40,24 +33,23 @@ trait IGuild<T> {
 #[starknet::interface]
 trait IOrganisation<TContractState> {
     // view functions
-    fn get_contributions_points(self: @TContractState, contributor: ContractAddress) -> Array<Contribution>;
-    fn get_guild_points(self: @TContractState, contributor: ContractAddress, guild: felt252) -> u32;
-    fn get_last_update_id(self: @TContractState) -> u32;
-    fn get_last_update_time(self: @TContractState) -> u64;
+    fn get_cum_contributions_points(self: @TContractState, contributor: ContractAddress) -> Array<u32>;
+    fn get_all_guilds(self: @TContractState) -> (u8, Array::<ContractAddress>);
+    fn get_guild_monthly_total_contribution(self: @TContractState, month_id: u32, guild: ContractAddress) -> u32;
+    fn get_guild_contributions_data(self: @TContractState, contributor: ContractAddress, guild: ContractAddress) -> Array<u32>;
+    fn get_guild_points(self: @TContractState, contributor: ContractAddress, guild: ContractAddress) -> u32;
+    fn get_guild_contribution_for_month(self: @TContractState, contributor: ContractAddress, month_id: u32, guild: ContractAddress) -> u32;
     fn get_migartion_queued_state(self: @TContractState, hash: felt252 ) -> bool;
-    fn get_guild_SBT(self: @TContractState, guild: felt252) -> ContractAddress;
-    fn get_contributions_data(self: @TContractState, contributor: ContractAddress, guild: felt252) -> Array<u32>;
-    fn get_guild_total_contribution(self: @TContractState, month_id: u32, guild: felt252) -> u32;
-    fn get_guild_contribution_for_month(self: @TContractState, contributor: ContractAddress, month_id: u32, guild: felt252) -> u32;
-
+    fn get_salary_contract_class_hash(self: @TContractState) -> ClassHash;
+    fn get_salary_contract(self: @TContractState) -> ContractAddress;
 
     // external functions
-    fn update_contibutions(ref self: TContractState, month_id: u32, guild: felt252, contributions: Array::<MonthlyContribution>);
-    fn initialise(ref self: TContractState, guilds_name: Array::<felt252>, guilds_address: Array::<ContractAddress>);
-    fn add_guild(ref self: TContractState, guild_name: felt252, guild_address: ContractAddress);
-    fn migrate_points_initiated_by_DAO(ref self: TContractState, old_addresses: Array::<ContractAddress>, new_addresses: Array::<ContractAddress>);
+    fn add_guild(ref self: TContractState, guild_name: felt252, owner: ContractAddress) -> ContractAddress;
+    fn update_organisation_name(ref self: TContractState, new_name: felt252);
+    fn update_salary_contract(ref self: TContractState, owner: ContractAddress, token: ContractAddress);
     fn migrate_points_initiated_by_holder(ref self: TContractState, new_address: ContractAddress);
     fn execute_migrate_points_initiated_by_holder(ref self: TContractState, old_address: ContractAddress, new_address: ContractAddress);
+    fn replace_salary_contract_hash(ref self: TContractState, new_salary_contract_class: ClassHash);
 
 }
 
@@ -72,11 +64,12 @@ mod Organisation {
     use hash::LegacyHash;
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use integer::{u128_try_from_felt252, u256_sqrt, u256_from_felt252};
-    use starknet::syscalls::{replace_class_syscall, call_contract_syscall};
+    use starknet::syscalls::{replace_class_syscall, deploy_syscall};
     use coordination_stack_core::array_storage::StoreFelt252Array;
     use coordination_stack_core::array_storage::StoreU32Array;
 
-    use super::{Contribution, MonthlyContribution, IGuildDispatcher, IGuildDispatcherTrait};
+    use super::{//Guild, Contribution, MonthlyContribution, 
+    IGuildDispatcher, IGuildDispatcherTrait, IFactoryDispatcher, IFactoryDispatcherTrait};
 
     use openzeppelin::access::ownable::OwnableComponent;
 
@@ -93,15 +86,14 @@ mod Organisation {
     //
     #[storage]
     struct Storage {
-        _contributions: LegacyMap::<(ContractAddress, felt252), Contribution>, // @dev contributions points for each contributor for each guild
-        _contributions_data: LegacyMap::<(ContractAddress, felt252), Array<u32>>, // @dev contributions data for specific contributor and guild
-        _total_contribution: LegacyMap::<(u32, felt252), u32>, // @dev total contribution month wise [(month_id, guild) => points]
-        _last_update_id: u32, // @dev contribution update id
-        _last_update_time: u64, // @dev timestamp for last update
-        _guilds: Array<felt252>, // @dev array to store all the guilds
-        _guild_SBT: LegacyMap::<felt252, ContractAddress>, // @dev contract address for guild SBTs
-        _initialised: bool, // @dev Flag to store initialisation state
+        _name: felt252, // @dev name of the Organisation
+        _factory: ContractAddress, // @dev factory contract to deploy new guilds
+        _all_guilds: LegacyMap::<u8, ContractAddress>, // @dev array to store all the guilds
+        _num_of_guilds: u8, // @dev to store total number of guilds
+        _guilds_id: LegacyMap::<ContractAddress, u8>, // @dev  mapping to store (Guild address => Id)
         _queued_migrations: LegacyMap::<felt252, bool>, // @dev flag to store queued migration requests.
+        _salary_contract_class_hash: ClassHash,
+        _salary: ContractAddress, // @dev salary contract to payot salary.
         #[substorage(v0)]
         ownable_storage: OwnableComponent::Storage
     }
@@ -109,24 +101,16 @@ mod Organisation {
     #[event]
     #[derive(Drop, starknet::Event)]
     enum Event {
-        ContributionUpdated: ContributionUpdated,
         MigrationQueued: MigrationQueued,
         Migrated: Migrated,
+        GuildAdded: GuildAdded,
+        NameChanged: NameChanged,
         #[flat]
         OwnableEvent: OwnableComponent::Event
     }
 
-    // @notice An event emitted whenever contribution is updated
-    #[derive(Drop, starknet::Event)]
-    struct ContributionUpdated {
-        update_id: u32, 
-        contributor: ContractAddress,
-        month_id: u32,
-        guild: felt252,
-        points_earned: u32
-    }
 
-    // @notice An event emitted whenever migration is queued
+    // @notice An event emitted whenever migration is queued via migrate_points_initiated_by_holder
     #[derive(Drop, starknet::Event)]
     struct MigrationQueued {
         old_address: ContractAddress, 
@@ -140,6 +124,21 @@ mod Organisation {
         new_address: ContractAddress
     }
 
+    // @notice An event emitted whenever a new guild is added via add_guild
+    #[derive(Drop, starknet::Event)]
+    struct GuildAdded {
+        name: felt252, 
+        id: u8,
+        guild: ContractAddress
+    }
+
+    // @notice An event emitted whenever organisation name is updated via update_organisation_name
+    #[derive(Drop, starknet::Event)]
+    struct NameChanged {
+        old_name: felt252, 
+        new_name: felt252
+    }
+
 
     //
     // Constructor
@@ -147,13 +146,11 @@ mod Organisation {
 
     // @notice Contract constructor
     #[constructor]
-    fn constructor(ref self: ContractState, owner_: ContractAddress,) {
-        // @notice not sure if default is already zero or need to initialise.
-        self._last_update_id.write(0_u32);
-        self._last_update_time.write(0_u64);
-        self._initialised.write(false);
+    fn constructor(ref self: ContractState, name: felt252, owner: ContractAddress, factory: ContractAddress) {
+        self._name.write(name);
+        self._factory.write(factory);
 
-        self.ownable_storage.initializer(owner_)
+        self.ownable_storage.initializer(owner)
 
     }
 
@@ -162,148 +159,131 @@ mod Organisation {
         //
         // Getters
         //
-        fn get_contributions_points(self: @ContractState, contributor: ContractAddress) -> Array<Contribution> {
-            let guilds = self._guilds.read();
-            let mut contributions = ArrayTrait::<Contribution>::new();
-            let mut current_index = 0;
+        // @notice Get all the guilds registered
+        // @return all_guilds_len Length of `all_guilds` array
+        // @return all_guilds Array of addresses of all guilds
+        fn get_all_guilds(self: @ContractState) -> (u8, Array::<ContractAddress>) { 
+            let mut all_guilds_array = ArrayTrait::<ContractAddress>::new();
+            let num_guilds = self._num_of_guilds.read();
+            let mut current_index = 1; // guild id starts from 1, 0 is reserve for not exists
             loop {
-                if (current_index == guilds.len()) {
+                if current_index == num_guilds + 1 {
+                    break true;
+                }
+                all_guilds_array.append(self._all_guilds.read(current_index));
+                current_index += 1;
+            };
+            (num_guilds, all_guilds_array)
+        }
+
+        fn get_cum_contributions_points(self: @ContractState, contributor: ContractAddress) -> Array<u32> {
+            let num_guilds = self._num_of_guilds.read();
+            let mut contributions = ArrayTrait::<u32>::new();
+            let mut current_index = 1; // guild id starts from 1, 0 is reserve for not exists
+            loop {
+                if (current_index == num_guilds + 1) {
                     break;
                 }
-                let contribution = self._contributions.read((contributor, *guilds[current_index]));
-                contributions.append(contribution);
+                let guild = self._all_guilds.read(current_index);
+                let guild_dispatcher = IGuildDispatcher {contract_address: guild};
+                let guild_cum_points = guild_dispatcher.get_cum_contributions_points(contributor);
+                
+                contributions.append(guild_cum_points);
                 current_index += 1;
             };
             contributions
         }
 
-        fn get_guild_total_contribution(self: @ContractState, month_id: u32, guild: felt252) -> u32 {
-            self._total_contribution.read((month_id, guild))
+        fn get_guild_monthly_total_contribution(self: @ContractState, month_id: u32, guild: ContractAddress) -> u32 {
+            let guild_dispatcher = IGuildDispatcher {contract_address: guild};
+            guild_dispatcher.get_monthly_total_contribution(month_id)
         }
 
-        fn get_contributions_data(self: @ContractState, contributor: ContractAddress, guild: felt252) -> Array<u32> {
-            self._contributions_data.read((contributor, guild))      
+        fn get_guild_contributions_data(self: @ContractState, contributor: ContractAddress, guild: ContractAddress) -> Array<u32> {
+            let guild_dispatcher = IGuildDispatcher {contract_address: guild};
+            guild_dispatcher.get_contributions_data(contributor)
         }
 
-        fn get_guild_points(self: @ContractState, contributor: ContractAddress, guild: felt252) -> u32 {
-            self._contributions.read((contributor, guild)).cum_point
+        fn get_guild_points(self: @ContractState, contributor: ContractAddress, guild: ContractAddress) -> u32 {
+            let guild_dispatcher = IGuildDispatcher {contract_address: guild};
+            guild_dispatcher.get_cum_contributions_points(contributor)  
         }
 
-        fn get_guild_contribution_for_month(self: @ContractState, contributor: ContractAddress, month_id: u32, guild: felt252) -> u32 {
-            let contribution_data = self._contributions_data.read((contributor, guild));
-            let mut current_index = contribution_data.len();
-            let point = loop {
-                if (current_index == 0) {
-                    break 0;
-                }
-                if(month_id == *contribution_data[current_index - 2]) {
-                    break *contribution_data[current_index - 1];
-                }
-
-                current_index -= 2;
-            };
-            point
-        }
-
-        fn get_last_update_id(self: @ContractState) -> u32 {
-            self._last_update_id.read()
-        }
-
-        fn get_last_update_time(self: @ContractState) -> u64 {
-            self._last_update_time.read()
+        fn get_guild_contribution_for_month(self: @ContractState, contributor: ContractAddress, month_id: u32, guild: ContractAddress) -> u32 {
+            let guild_dispatcher = IGuildDispatcher {contract_address: guild};
+            guild_dispatcher.get_monthly_contribution_points(contributor, month_id)
         }
 
         fn get_migartion_queued_state(self: @ContractState, hash: felt252 ) -> bool {
             self._queued_migrations.read(hash)
         }
 
-        fn get_guild_SBT(self: @ContractState, guild: felt252) -> ContractAddress {
-            self._guild_SBT.read(guild)
+        // @notice Get the class hash of the Salary contract.
+        // @return class_hash
+        fn get_salary_contract_class_hash(self: @ContractState) -> ClassHash {
+            self._salary_contract_class_hash.read()
         }
 
+        fn get_salary_contract(self: @ContractState) -> ContractAddress {
+            self._salary.read()
+        }
 
         //
         // Setters
         //
 
-        fn initialise(ref self: ContractState, guilds_name: Array::<felt252>, guilds_address: Array::<ContractAddress>) {
+        fn add_guild(ref self: ContractState, guild_name: felt252, owner: ContractAddress) -> ContractAddress {
             self.ownable_storage.assert_only_owner();
-            let is_initialised = self._initialised.read();
-            assert (is_initialised == false, 'ALREADY_INITIALISED');
-            self._guilds.write(guilds_name.clone());
+            let current_contract = get_contract_address();
+            let factory = self._factory.read();
+            let factory_dispatcher = IFactoryDispatcher {contract_address: factory};
+            let guild_contract_class_hash = factory_dispatcher.get_guild_contract_class_hash();
 
-            let mut current_index = 0;
-            loop {
-                if (current_index == guilds_name.len()) {
-                    break;
-                }
-                self._guild_SBT.write(*guilds_name[current_index], *guilds_address[current_index]);
-                current_index += 1;
-            };
-            self._initialised.write(true);
+            let mut constructor_calldata = Default::default();
+            Serde::serialize(@guild_name, ref constructor_calldata);
+            Serde::serialize(@current_contract, ref constructor_calldata);
+            Serde::serialize(@owner, ref constructor_calldata);
+
+            let syscall_result = deploy_syscall(
+                guild_contract_class_hash, 0, constructor_calldata.span(), false
+            );
+            let (guild, _) = syscall_result.unwrap_syscall();
+
+            let num_guilds = self._num_of_guilds.read();
+            // self._guilds.write(guild_name, num_guilds + 1);
+            // let guild = Guild {name: guild_name, guild: guild_address};
+            self._all_guilds.write(num_guilds + 1, guild);
+            self._num_of_guilds.write(num_guilds + 1);
+
+            self.emit(GuildAdded {name: guild_name, id: num_guilds + 1, guild: guild});
+
+            guild
         }
 
-        fn update_contibutions(ref self: ContractState, month_id: u32, guild: felt252, contributions: Array::<MonthlyContribution>) {
+        fn update_organisation_name(ref self: ContractState, new_name: felt252) {
             self.ownable_storage.assert_only_owner();
-            let block_timestamp = get_block_timestamp();
-            let mut id = self._last_update_id.read();
-            let mut current_index = 0;
+            let current_name = self._name.read();
+            self._name.write(new_name);
 
-            // for keeping track of cummulative guild points for that month.
-            let mut total_cum = 0_u32;
-
-            loop {
-                if (current_index == contributions.len()) {
-                    break;
-                }
-                let new_contributions: MonthlyContribution = *contributions[current_index];
-                let contributor: ContractAddress = new_contributions.contributor;
-                let old_contribution = self._contributions.read((contributor, guild));
-
-                let new_cum_point = InternalImpl::_update_guild_data(ref self, old_contribution.cum_point, new_contributions.point, month_id, contributor, guild);
-                
-                total_cum += new_contributions.point;
-
-                let updated_contribution = Contribution{cum_point: new_cum_point, last_timestamp: block_timestamp};
-                self._contributions.write((contributor, guild),  updated_contribution);
-
-                current_index += 1;
-
-                self.emit(ContributionUpdated{update_id: id, contributor: contributor, month_id: month_id, guild: guild, points_earned: new_contributions.point});
-
-            };
-            self._total_contribution.write((month_id, guild), total_cum);
-
-            id += 1;
-            self._last_update_id.write(id);
-            self._last_update_time.write(block_timestamp);
-
+            self.emit(NameChanged {old_name: current_name, new_name: new_name});
         }
 
-        fn add_guild(ref self: ContractState, guild_name: felt252, guild_address: ContractAddress) {
+        fn update_salary_contract(ref self: ContractState, owner: ContractAddress, token: ContractAddress) {
             self.ownable_storage.assert_only_owner();
-            let mut guilds = self._guilds.read();
-            guilds.append(guild_name);
-            self._guilds.write(guilds);
-            self._guild_SBT.write(guild_name, guild_address);
+            let current_contract = get_contract_address();
+            let salary_contract_class_hash = self._salary_contract_class_hash.read();
+
+            let mut constructor_calldata = Default::default();
+            Serde::serialize(@owner, ref constructor_calldata);
+            Serde::serialize(@token, ref constructor_calldata);
+            Serde::serialize(@current_contract, ref constructor_calldata);
+
+            let syscall_result = deploy_syscall(
+                salary_contract_class_hash, 0, constructor_calldata.span(), false
+            );
+            let (salary, _) = syscall_result.unwrap_syscall();
+            self._salary.write(salary);
         }
-
-
-        fn migrate_points_initiated_by_DAO(ref self: ContractState, old_addresses: Array::<ContractAddress>, new_addresses: Array::<ContractAddress> ) {
-            self.ownable_storage.assert_only_owner();
-            assert(old_addresses.len() == new_addresses.len(), 'INVALID_INPUTS');
-            let mut current_index = 0;
-
-            loop {
-                if (current_index == old_addresses.len()) {
-                    break;
-                }
-                InternalImpl::_migrate_points(ref self, *old_addresses[current_index], *new_addresses[current_index]);
-                current_index += 1;
-            };
-
-        }
-
 
         fn migrate_points_initiated_by_holder(ref self: ContractState, new_address: ContractAddress) {
             // TODO: if new address already have any contribution points, if yes return. 
@@ -328,9 +308,14 @@ mod Organisation {
             self._queued_migrations.write(migration_hash, false);
 
         }
-
-
-
+        // @notice This replaces _salary_contract_class_hash used to deploy new salary
+        // @dev Only owner can call
+        // @param new_salary_contract_class New _salary_contract_class_hash
+        fn replace_salary_contract_hash(ref self: ContractState, new_salary_contract_class: ClassHash) {
+            self.ownable_storage.assert_only_owner();
+            assert(!new_salary_contract_class.is_zero(), 'must be non zero');
+            self._salary_contract_class_hash.write(new_salary_contract_class);
+        }
 
     }
 
@@ -340,51 +325,22 @@ mod Organisation {
         // Internals
         //
 
-        fn _update_guild_data(ref self: ContractState, old_guild_score: u32, new_contribution_score: u32, month_id: u32, contributor: ContractAddress, guild: felt252) -> u32 {
-            let new_guild_score = old_guild_score + new_contribution_score;
-            if(new_contribution_score != 0) {
-                let mut contribution_data = self._contributions_data.read((contributor, guild));
-                    contribution_data.append(month_id);
-                    contribution_data.append(new_contribution_score);
-
-                    self._contributions_data.write((contributor, guild), contribution_data);
-            }
-            (new_guild_score)
-        }
-
         fn _migrate_points(ref self: ContractState, old_address: ContractAddress, new_address: ContractAddress) {
 
-            let guilds = self._guilds.read();
-            let mut contributions = ArrayTrait::<Contribution>::new();
+            let num_guilds = self._num_of_guilds.read();
             
-            let mut current_index = 0;
+            let mut current_index = 1; // guild index starts from 1, instead of zero
             loop {
-                if (current_index == guilds.len()) {
+                if (current_index == num_guilds + 1) {
                     break;
                 }
-                let guild_address = self._guild_SBT.read(*guilds[current_index]);
-                let contribution = self._contributions.read((old_address, *guilds[current_index]));
-                // updating contribution data and transfering SBTs
-                InternalImpl::_update_contribution_data_and_migrate(ref self, old_address, new_address, *guilds[current_index], guild_address);
-                let zero_contribution = Contribution{cum_point: 0_u32,
-                                                 last_timestamp: 0_u64
-                                                };
-                self._contributions.write((old_address, *guilds[current_index]), zero_contribution);
-                self._contributions.write((new_address, *guilds[current_index]), contribution);
+                let guild = self._all_guilds.read(current_index);
+                let guild_dispatcher = IGuildDispatcher {contract_address: guild};
+                guild_dispatcher.migrate_points(old_address, new_address);
             };
 
             self.emit(Migrated{old_address: old_address, new_address: new_address});
 
-        }
-
-        fn _update_contribution_data_and_migrate(ref self: ContractState, old_address: ContractAddress, new_address: ContractAddress, guild: felt252, guild_contract: ContractAddress) {
-            let guild_data = self._contributions_data.read((old_address, guild));
-
-            self._contributions_data.write((new_address, guild), guild_data);
-            self._contributions_data.write((old_address, guild), ArrayTrait::new());
-
-            let guildDispatcher = IGuildDispatcher { contract_address: guild_contract };
-            guildDispatcher.migrate_sbt(old_address, new_address);
         }
 
     } 
