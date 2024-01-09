@@ -36,6 +36,7 @@ trait IOrganisation<TContractState> {
     fn get_guild_monthly_total_contribution(self: @TContractState, month_id: u32, guild: ContractAddress) -> u32;
     fn get_guild_contributions_data(self: @TContractState, contributor: ContractAddress, guild: ContractAddress) -> Array<u32>;
     fn get_guild_points(self: @TContractState, contributor: ContractAddress, guild: ContractAddress) -> u32;
+    fn get_treasury(self: @TContractState) -> ContractAddress;
 }
 
 //
@@ -180,7 +181,7 @@ mod SalaryDistributor {
         //
 
         fn add_fund_to_salary_pools(ref self: ContractState, month_id: u32, amounts: Array<u256>, guilds: Array<ContractAddress>) {
-            self.ownable_storage.assert_only_owner();
+            self._only_treasury();
             let caller = get_caller_address();
             let contract_address = get_contract_address();
             let mut amount_to_transfer = 0;
@@ -275,6 +276,14 @@ mod SalaryDistributor {
 
             };
             cum_salary
+        }
+
+        fn _only_treasury(ref self: ContractState) {
+            let caller = get_caller_address();
+            let organisation = self._organisation.read();
+            let organisation_dispatcher = IOrganisationDispatcher {contract_address: organisation};
+            let treasury = organisation_dispatcher.get_treasury();
+            assert(caller == treasury, 'NOT_TREASURY');
         }
 
     }

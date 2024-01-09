@@ -7,6 +7,7 @@ mod organisation;
 mod guild;
 mod salary;
 mod guildSBT;
+mod treasury;
 // mod round;
 // mod shares;
 // mod usdc;

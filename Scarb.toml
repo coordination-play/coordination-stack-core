@@ -2,7 +2,8 @@
 name = "coordination_stack_core"
 version = "0.1.0"
 
-# See more keys and their definitions at https://docs.swmansion.com/scarb/docs/reference/manifest.html
+[lib]
+
 [[target.starknet-contract]]
 sierra = true
 casm = true
@@ -13,6 +14,6 @@ allowed-libfuncs-list.name = "all"
 alexandria_storage = { git = "https://github.com/keep-starknet-strange/alexandria.git" }
 
 [dependencies]
-starknet = "2.2.0"
-snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v0.7.1" }
-openzeppelin = { git = "https://github.com/openzeppelin/cairo-contracts", tag = "v0.7.0" }
+starknet = "2.4.1"
+snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v0.13.1" }
+openzeppelin = { git = "https://github.com/openzeppelin/cairo-contracts", tag = "v0.8.0" }

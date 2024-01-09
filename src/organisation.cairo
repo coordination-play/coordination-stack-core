@@ -4,7 +4,6 @@
 // @notice Organisation, main contract for each org and to store contribution points
 
 use starknet::ContractAddress;
-use array::Array;
 use starknet::ClassHash;
 
 //
@@ -24,6 +23,8 @@ trait IGuild<TContractState> {
 #[starknet::interface]
 trait IFactory<TContractState> {
     fn get_guild_contract_class_hash(self: @TContractState) -> ClassHash;
+    fn get_salary_contract_class_hash(self: @TContractState) -> ClassHash;
+    fn get_treasury_contract_class_hash(self: @TContractState) -> ClassHash;
 }
 
 
@@ -40,16 +41,16 @@ trait IOrganisation<TContractState> {
     fn get_guild_points(self: @TContractState, contributor: ContractAddress, guild: ContractAddress) -> u32;
     fn get_guild_contribution_for_month(self: @TContractState, contributor: ContractAddress, month_id: u32, guild: ContractAddress) -> u32;
     fn get_migartion_queued_state(self: @TContractState, hash: felt252 ) -> bool;
-    fn get_salary_contract_class_hash(self: @TContractState) -> ClassHash;
     fn get_salary_contract(self: @TContractState) -> ContractAddress;
+    fn get_treasury(self: @TContractState) -> ContractAddress;
 
     // external functions
     fn add_guild(ref self: TContractState, guild_name: felt252, owner: ContractAddress) -> ContractAddress;
     fn update_organisation_name(ref self: TContractState, new_name: felt252);
     fn update_salary_contract(ref self: TContractState, owner: ContractAddress, token: ContractAddress);
+    fn update_treasury_contract(ref self: TContractState, owner: ContractAddress);
     fn migrate_points_initiated_by_holder(ref self: TContractState, new_address: ContractAddress);
     fn execute_migrate_points_initiated_by_holder(ref self: TContractState, old_address: ContractAddress, new_address: ContractAddress);
-    fn replace_salary_contract_hash(ref self: TContractState, new_salary_contract_class: ClassHash);
 
 }
 
@@ -93,7 +94,8 @@ mod Organisation {
         _guilds_id: LegacyMap::<ContractAddress, u8>, // @dev  mapping to store (Guild address => Id)
         _queued_migrations: LegacyMap::<felt252, bool>, // @dev flag to store queued migration requests.
         _salary_contract_class_hash: ClassHash,
-        _salary: ContractAddress, // @dev salary contract to payot salary.
+        _salary: ContractAddress, // @dev salary contract to payout salary.
+        _treasury: ContractAddress, // @dev Treasury contract to manage org funds.
         #[substorage(v0)]
         ownable_storage: OwnableComponent::Storage
     }
@@ -218,14 +220,13 @@ mod Organisation {
             self._queued_migrations.read(hash)
         }
 
-        // @notice Get the class hash of the Salary contract.
-        // @return class_hash
-        fn get_salary_contract_class_hash(self: @ContractState) -> ClassHash {
-            self._salary_contract_class_hash.read()
-        }
 
         fn get_salary_contract(self: @ContractState) -> ContractAddress {
             self._salary.read()
+        }
+
+        fn get_treasury(self: @ContractState) -> ContractAddress {
+            self._treasury.read()
         }
 
         //
@@ -271,7 +272,9 @@ mod Organisation {
         fn update_salary_contract(ref self: ContractState, owner: ContractAddress, token: ContractAddress) {
             self.ownable_storage.assert_only_owner();
             let current_contract = get_contract_address();
-            let salary_contract_class_hash = self._salary_contract_class_hash.read();
+            let factory = self._factory.read();
+            let factory_dispatcher = IFactoryDispatcher {contract_address: factory};
+            let salary_contract_class_hash = factory_dispatcher.get_salary_contract_class_hash();
 
             let mut constructor_calldata = Default::default();
             Serde::serialize(@owner, ref constructor_calldata);
@@ -283,6 +286,24 @@ mod Organisation {
             );
             let (salary, _) = syscall_result.unwrap_syscall();
             self._salary.write(salary);
+        }
+
+        fn update_treasury_contract(ref self: ContractState, owner: ContractAddress) {
+            self.ownable_storage.assert_only_owner();
+            let current_contract = get_contract_address();
+            let factory = self._factory.read();
+            let factory_dispatcher = IFactoryDispatcher {contract_address: factory};
+            let treasury_contract_class_hash = factory_dispatcher.get_treasury_contract_class_hash();
+
+            let mut constructor_calldata = Default::default();
+            Serde::serialize(@owner, ref constructor_calldata);
+            Serde::serialize(@current_contract, ref constructor_calldata);
+
+            let syscall_result = deploy_syscall(
+                treasury_contract_class_hash, 0, constructor_calldata.span(), false
+            );
+            let (treasury, _) = syscall_result.unwrap_syscall();
+            self._treasury.write(treasury);
         }
 
         fn migrate_points_initiated_by_holder(ref self: ContractState, new_address: ContractAddress) {
@@ -307,14 +328,6 @@ mod Organisation {
             InternalImpl::_migrate_points(ref self, old_address, new_address);
             self._queued_migrations.write(migration_hash, false);
 
-        }
-        // @notice This replaces _salary_contract_class_hash used to deploy new salary
-        // @dev Only owner can call
-        // @param new_salary_contract_class New _salary_contract_class_hash
-        fn replace_salary_contract_hash(ref self: ContractState, new_salary_contract_class: ClassHash) {
-            self.ownable_storage.assert_only_owner();
-            assert(!new_salary_contract_class.is_zero(), 'must be non zero');
-            self._salary_contract_class_hash.write(new_salary_contract_class);
         }
 
     }
