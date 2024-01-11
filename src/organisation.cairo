@@ -6,12 +6,21 @@
 use starknet::ContractAddress;
 use starknet::ClassHash;
 
+#[derive(Copy, Drop, Serde, starknet::Store)]
+struct Guild {
+    // @notice name of the guild
+    name: felt252,
+    // @notice guild contract address
+    guild: ContractAddress
+}
+
 //
 // External Interfaces
 //
 
 #[starknet::interface]
 trait IGuild<TContractState> {
+    fn name(self: @TContractState) -> felt252;
     fn get_cum_contributions_points(self: @TContractState, contributor: ContractAddress) -> u32;
     fn get_monthly_total_contribution(self: @TContractState, month_id: u32) -> u32;
     fn get_contributions_data(self: @TContractState, contributor: ContractAddress) -> Array<u32>;
@@ -34,8 +43,11 @@ trait IFactory<TContractState> {
 #[starknet::interface]
 trait IOrganisation<TContractState> {
     // view functions
+    fn name(self: @TContractState) -> felt252;
+    fn metadata(self: @TContractState) -> Span<felt252>;
     fn get_cum_contributions_points(self: @TContractState, contributor: ContractAddress) -> Array<u32>;
     fn get_all_guilds(self: @TContractState) -> (u8, Array::<ContractAddress>);
+    fn get_all_guilds_details(self: @TContractState) -> (u8, Array::<Guild>);
     fn get_guild_monthly_total_contribution(self: @TContractState, month_id: u32, guild: ContractAddress) -> u32;
     fn get_guild_contributions_data(self: @TContractState, contributor: ContractAddress, guild: ContractAddress) -> Array<u32>;
     fn get_guild_points(self: @TContractState, contributor: ContractAddress, guild: ContractAddress) -> u32;
@@ -47,6 +59,7 @@ trait IOrganisation<TContractState> {
     // external functions
     fn add_guild(ref self: TContractState, guild_name: felt252, owner: ContractAddress) -> ContractAddress;
     fn update_organisation_name(ref self: TContractState, new_name: felt252);
+    fn update_organisation_metadata(ref self: TContractState, new_metadata: Span<felt252>);
     fn update_salary_contract(ref self: TContractState, owner: ContractAddress, token: ContractAddress);
     fn update_treasury_contract(ref self: TContractState, owner: ContractAddress);
     fn migrate_points_initiated_by_holder(ref self: TContractState, new_address: ContractAddress);
@@ -66,11 +79,9 @@ mod Organisation {
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use integer::{u128_try_from_felt252, u256_sqrt, u256_from_felt252};
     use starknet::syscalls::{replace_class_syscall, deploy_syscall};
-    use coordination_stack_core::array_storage::StoreFelt252Array;
-    use coordination_stack_core::array_storage::StoreU32Array;
+    use coordination_stack_core::span_storage::StoreSpanFelt252;
 
-    use super::{//Guild, Contribution, MonthlyContribution, 
-    IGuildDispatcher, IGuildDispatcherTrait, IFactoryDispatcher, IFactoryDispatcherTrait};
+    use super::{Guild, IGuildDispatcher, IGuildDispatcherTrait, IFactoryDispatcher, IFactoryDispatcherTrait};
 
     use openzeppelin::access::ownable::OwnableComponent;
 
@@ -88,6 +99,7 @@ mod Organisation {
     #[storage]
     struct Storage {
         _name: felt252, // @dev name of the Organisation
+        _metadata: Span<felt252>, // @dev metadata of the Organisation
         _factory: ContractAddress, // @dev factory contract to deploy new guilds
         _all_guilds: LegacyMap::<u8, ContractAddress>, // @dev array to store all the guilds
         _num_of_guilds: u8, // @dev to store total number of guilds
@@ -107,6 +119,7 @@ mod Organisation {
         Migrated: Migrated,
         GuildAdded: GuildAdded,
         NameChanged: NameChanged,
+        MetadataUpdated: MetadataUpdated,
         #[flat]
         OwnableEvent: OwnableComponent::Event
     }
@@ -141,6 +154,13 @@ mod Organisation {
         new_name: felt252
     }
 
+    // @notice An event emitted whenever organisation metadata is updated via update_organisation_metadata
+    #[derive(Drop, starknet::Event)]
+    struct MetadataUpdated {
+        old_metadata: Span<felt252>, 
+        new_metadata: Span<felt252>
+    }
+
 
     //
     // Constructor
@@ -148,8 +168,9 @@ mod Organisation {
 
     // @notice Contract constructor
     #[constructor]
-    fn constructor(ref self: ContractState, name: felt252, owner: ContractAddress, factory: ContractAddress) {
+    fn constructor(ref self: ContractState, name: felt252, metadata: Span<felt252>, owner: ContractAddress, factory: ContractAddress) {
         self._name.write(name);
+        self._metadata.write(metadata);
         self._factory.write(factory);
 
         self.ownable_storage.initializer(owner)
@@ -161,6 +182,14 @@ mod Organisation {
         //
         // Getters
         //
+        fn name(self: @ContractState) -> felt252 {
+            self._name.read()
+        }
+
+        fn metadata(self: @ContractState) -> Span<felt252> {
+            self._metadata.read()
+        }
+
         // @notice Get all the guilds registered
         // @return all_guilds_len Length of `all_guilds` array
         // @return all_guilds Array of addresses of all guilds
@@ -173,6 +202,27 @@ mod Organisation {
                     break true;
                 }
                 all_guilds_array.append(self._all_guilds.read(current_index));
+                current_index += 1;
+            };
+            (num_guilds, all_guilds_array)
+        }
+
+        // @notice Get all the guilds registered
+        // @return all_guilds_len Length of `all_guilds` array
+        // @return all_guilds Array of Guild of all guilds
+        fn get_all_guilds_details(self: @ContractState) -> (u8, Array::<Guild>) { 
+            let mut all_guilds_array = ArrayTrait::<Guild>::new();
+            let num_guilds = self._num_of_guilds.read();
+            let mut current_index = 1; // guild id starts from 1, 0 is reserve for not exists
+            loop {
+                if current_index == num_guilds + 1 {
+                    break true;
+                }
+                let guild_address = self._all_guilds.read(current_index);
+                let guild_dispatcher = IGuildDispatcher {contract_address: guild_address};
+                let name = guild_dispatcher.name();
+                let guild = Guild {name: name, guild: guild_address};
+                all_guilds_array.append(guild);
                 current_index += 1;
             };
             (num_guilds, all_guilds_array)
@@ -268,6 +318,15 @@ mod Organisation {
 
             self.emit(NameChanged {old_name: current_name, new_name: new_name});
         }
+
+        fn update_organisation_metadata(ref self: ContractState, new_metadata: Span<felt252>) {
+            self.ownable_storage.assert_only_owner();
+            let current_metadata = self._metadata.read();
+            self._metadata.write(new_metadata);
+
+            self.emit(MetadataUpdated {old_metadata: current_metadata, new_metadata: new_metadata});
+        }
+
 
         fn update_salary_contract(ref self: ContractState, owner: ContractAddress, token: ContractAddress) {
             self.ownable_storage.assert_only_owner();

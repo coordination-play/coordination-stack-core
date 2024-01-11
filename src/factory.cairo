@@ -6,6 +6,17 @@
 use starknet::ContractAddress;
 use array::Array;
 use starknet::ClassHash;
+use coordination_stack_core::span_storage::StoreSpanFelt252;
+
+#[derive(Copy, Drop, Serde, starknet::Store)]
+struct Organisation {
+    // @notice name of the organisation
+    name: felt252,
+    // @notice organisation metadata
+    metadata: Span<felt252>,
+    // @notice organisation contract address
+    organisation: ContractAddress
+}
 
 #[derive(Copy, Drop, Serde, starknet::Store)]
 struct Deposit {
@@ -31,6 +42,8 @@ trait IERC20<T> {
 #[starknet::interface]
 trait IOrganisation<TContractState> {
     fn owner(self: @TContractState) -> ContractAddress;
+    fn name(self: @TContractState) -> felt252;
+    fn metadata(self: @TContractState) -> Span<felt252>;
 }
 
 #[starknet::interface]
@@ -39,6 +52,7 @@ trait IFactory<TContractState> {
     fn get_creation_deposit(self: @TContractState) -> u256;
     fn get_lock_duration(self: @TContractState) -> u64;
     fn get_all_organisations(self: @TContractState) -> (u32, Array::<ContractAddress>);
+    fn get_all_organisations_details(self: @TContractState) -> (u32, Array::<Organisation>);
     fn get_num_of_organisations(self: @TContractState) -> u32;
     fn get_organisation_contract_class_hash(self: @TContractState) -> ClassHash;
     fn get_guild_contract_class_hash(self: @TContractState) -> ClassHash;
@@ -46,7 +60,7 @@ trait IFactory<TContractState> {
     fn get_treasury_contract_class_hash(self: @TContractState) -> ClassHash;
     // external functions
     fn update_creation_deposit(ref self: TContractState, new_deposit: u256);
-    fn create_organisation(ref self: TContractState, name: felt252 ) -> ContractAddress;
+    fn create_organisation(ref self: TContractState, name: felt252, metadata: Span<felt252> ) -> ContractAddress;
     fn withdraw_deposit(ref self: TContractState, organisation: ContractAddress, receipent: ContractAddress);
     fn replace_organisation_contract_hash(ref self: TContractState, new_organisation_contract_class: ClassHash);
     fn replace_guild_contract_hash(ref self: TContractState, new_guild_contract_class: ClassHash);
@@ -68,8 +82,8 @@ mod Factory {
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use integer::{u128_try_from_felt252, u256_sqrt, u256_from_felt252};
     use starknet::syscalls::{replace_class_syscall, deploy_syscall};
-    use super::{Deposit, IERC20Dispatcher, IERC20DispatcherTrait, IOrganisationDispatcher, IOrganisationDispatcherTrait};
-
+    use super::{Organisation, Deposit, IERC20Dispatcher, IERC20DispatcherTrait, IOrganisationDispatcher, IOrganisationDispatcherTrait};
+    use coordination_stack_core::span_storage::StoreSpanFelt252;
     use openzeppelin::access::ownable::OwnableComponent;
     component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);
 
@@ -162,7 +176,7 @@ mod Factory {
 
         // @notice Get all the organisations registered
         // @return all_organisations_len Length of `all_organisations` array
-        // @return all_organisations Array of Organisations of the registered organisations
+        // @return all_organisations Array of contract addresses of the registered organisations
         fn get_all_organisations(self: @ContractState) -> (u32, Array::<ContractAddress>) { 
             let mut all_organisations_array = ArrayTrait::<ContractAddress>::new();
             let num_organisations = self._num_of_organisations.read();
@@ -172,6 +186,28 @@ mod Factory {
                     break true;
                 }
                 all_organisations_array.append(self._all_organisations.read(current_index));
+                current_index += 1;
+            };
+            (num_organisations, all_organisations_array)
+        }
+
+        // @notice Get all the organisations registered
+        // @return all_organisations_len Length of `all_organisations` array
+        // @return all_organisations Array of Organisations of the registered organisations
+        fn get_all_organisations_details(self: @ContractState) -> (u32, Array::<Organisation>) { 
+            let mut all_organisations_array = ArrayTrait::<Organisation>::new();
+            let num_organisations = self._num_of_organisations.read();
+            let mut current_index = 1; // organisation index starts from 1, instead of zero
+            loop {
+                if current_index == num_organisations + 1 {
+                    break true;
+                }
+                let organisation = self._all_organisations.read(current_index);
+                let organisation_dispatcher = IOrganisationDispatcher {contract_address: organisation};
+                let name = organisation_dispatcher.name();
+                let metadata = organisation_dispatcher.metadata();
+                let org = Organisation {name: name, metadata: metadata, organisation: organisation};
+                all_organisations_array.append(org);
                 current_index += 1;
             };
             (num_organisations, all_organisations_array)
@@ -218,7 +254,7 @@ mod Factory {
             self.emit(DepositUpdated {new_deposit: new_deposit});
 
         }
-        fn create_organisation(ref self: ContractState, name: felt252 ) -> ContractAddress {
+        fn create_organisation(ref self: ContractState, name: felt252, metadata: Span<felt252> ) -> ContractAddress {
             assert(!name.is_zero(), 'NAME_NOT_DEFINED');
             let caller = get_caller_address();
             let factory = get_contract_address();
@@ -233,6 +269,7 @@ mod Factory {
 
             let mut constructor_calldata = Default::default();
             Serde::serialize(@name, ref constructor_calldata);
+            Serde::serialize(@metadata, ref constructor_calldata);
             Serde::serialize(@caller, ref constructor_calldata);
             Serde::serialize(@factory, ref constructor_calldata);
 

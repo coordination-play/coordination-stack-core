@@ -23,6 +23,7 @@ struct MonthlyContribution {
 #[starknet::interface]
 trait IGuild<TContractState> {
     // view functions
+    fn name(self: @TContractState) -> felt252;
     fn get_cum_contributions_points(self: @TContractState, contributor: ContractAddress) -> u32;
     fn get_monthly_total_contribution(self: @TContractState, month_id: u32) -> u32;
     fn get_contributions_data(self: @TContractState, contributor: ContractAddress) -> Array<u32>;
@@ -121,6 +122,10 @@ mod Guild {
         //
         // Getters
         //
+        fn name(self: @ContractState) -> felt252 {
+            self._name.read()
+        }
+
         fn get_cum_contributions_points(self: @ContractState, contributor: ContractAddress) -> u32 {
             self._contributions.read(contributor)
         }
