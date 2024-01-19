@@ -10,17 +10,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "openzeppelin"
-version = "0.8.0"
-source = "git+https://github.com/openzeppelin/cairo-contracts?tag=v0.8.0#c23e8e96de60e6e3159b1ff8591a1187269c0eb7"
-
-[[package]]
-name = "scripts"
+name = "deploy_scripts"
 version = "0.1.0"
 dependencies = [
  "coordination_stack_core",
  "sncast_std",
 ]
+
+[[package]]
+name = "openzeppelin"
+version = "0.8.0"
+source = "git+https://github.com/openzeppelin/cairo-contracts?tag=v0.8.0#c23e8e96de60e6e3159b1ff8591a1187269c0eb7"
 
 [[package]]
 name = "sncast_std"
