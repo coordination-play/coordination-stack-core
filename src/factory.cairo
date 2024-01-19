@@ -1,12 +1,12 @@
 // @title Factory in cairo 2.4.1
-// @author yash (tg-@yashm001)
+// @author Yash (tg-@yashm001)
 // @license MIT
 // @notice Factory to deploy new Organisation and Guilds and maintain a registry of all organisations
 
 use starknet::ContractAddress;
 use array::Array;
 use starknet::ClassHash;
-use coordination_stack_core::span_storage::StoreSpanFelt252;
+use coordination_stack_core::utils::span_storage::StoreSpanFelt252;
 
 #[derive(Copy, Drop, Serde, starknet::Store)]
 struct Organisation {
@@ -18,15 +18,6 @@ struct Organisation {
     organisation: ContractAddress
 }
 
-#[derive(Copy, Drop, Serde, starknet::Store)]
-struct Deposit {
-    // @notice amount deposited at the time to organisation creation
-    amount: u256,
-    // @notice unix timestamp 
-    creation_timestamp: u64,
-    // @notice flag to store claimed state
-    claimed: bool
-}
 
 #[starknet::interface]
 trait IERC20<T> {
@@ -49,8 +40,7 @@ trait IOrganisation<TContractState> {
 #[starknet::interface]
 trait IFactory<TContractState> {
     // view functions
-    fn get_creation_deposit(self: @TContractState) -> u256;
-    fn get_lock_duration(self: @TContractState) -> u64;
+    fn get_creation_fee(self: @TContractState) -> u256;
     fn get_all_organisations(self: @TContractState) -> (u32, Array::<ContractAddress>);
     fn get_all_organisations_details(self: @TContractState) -> (u32, Array::<Organisation>);
     fn get_num_of_organisations(self: @TContractState) -> u32;
@@ -58,15 +48,17 @@ trait IFactory<TContractState> {
     fn get_guild_contract_class_hash(self: @TContractState) -> ClassHash;
     fn get_salary_contract_class_hash(self: @TContractState) -> ClassHash;
     fn get_treasury_contract_class_hash(self: @TContractState) -> ClassHash;
+    fn get_permission_manager_contract_class_hash(self: @TContractState) -> ClassHash;
     // external functions
-    fn update_creation_deposit(ref self: TContractState, new_deposit: u256);
+    fn update_creation_fee(ref self: TContractState, new_fee: u256);
     fn create_organisation(ref self: TContractState, name: felt252, metadata: Span<felt252> ) -> ContractAddress;
-    fn withdraw_deposit(ref self: TContractState, organisation: ContractAddress, receipent: ContractAddress);
+    fn withdraw_fee(ref self: TContractState, receipent: ContractAddress);
     fn replace_organisation_contract_hash(ref self: TContractState, new_organisation_contract_class: ClassHash);
     fn replace_guild_contract_hash(ref self: TContractState, new_guild_contract_class: ClassHash);
     fn replace_implementation_class(ref self: TContractState, new_implementation_class: ClassHash);
     fn replace_salary_contract_hash(ref self: TContractState, new_salary_contract_class: ClassHash);
     fn replace_treasury_contract_hash(ref self: TContractState, new_treasury_contract_class: ClassHash);
+    fn replace_permission_manager_contract_hash(ref self: TContractState, new_permission_manager_contract_class: ClassHash);
 
 }
 
@@ -82,8 +74,8 @@ mod Factory {
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use integer::{u128_try_from_felt252, u256_sqrt, u256_from_felt252};
     use starknet::syscalls::{replace_class_syscall, deploy_syscall};
-    use super::{Organisation, Deposit, IERC20Dispatcher, IERC20DispatcherTrait, IOrganisationDispatcher, IOrganisationDispatcherTrait};
-    use coordination_stack_core::span_storage::StoreSpanFelt252;
+    use super::{Organisation, IERC20Dispatcher, IERC20DispatcherTrait, IOrganisationDispatcher, IOrganisationDispatcherTrait};
+    use coordination_stack_core::utils::span_storage::StoreSpanFelt252;
     use openzeppelin::access::ownable::OwnableComponent;
     component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);
 
@@ -98,16 +90,15 @@ mod Factory {
     //
     #[storage]
     struct Storage {
-        _creation_deposit: u256, // @dev a samll deposit to pay for creating org to avoid spamming.
-        _lock_duration: u64, // @dev, creation deposit can be withdrawn after lock duration.
-        _deposit_token: ContractAddress, // @dev, token contract contract to pay deposit in.
-        _deposits: LegacyMap::<ContractAddress, Deposit>, // @dev, to store deposits for all organisations.
+        _creation_fee: u256, // @dev a samll fee to pay for creating org to avoid spamming. 
+        _fee_token: ContractAddress, // @dev, token contract contract to pay fee in.
         _all_organisations: LegacyMap::<u32, ContractAddress>, // @dev registry of all organisations
         _num_of_organisations: u32,
         _organisation_contract_class_hash: ClassHash,
         _guild_contract_class_hash: ClassHash,
         _salary_contract_class_hash: ClassHash,
         _treasury_contract_class_hash: ClassHash,
+        _permission_manager_contract_class_hash: ClassHash,
         #[substorage(v0)]
         ownable_storage: OwnableComponent::Storage
     }
@@ -116,7 +107,7 @@ mod Factory {
     #[derive(Drop, starknet::Event)]
     enum Event {
         OrganisationCreated: OrganisationCreated,
-        DepositUpdated: DepositUpdated,
+        CreationFeeUpdated: CreationFeeUpdated,
         #[flat]
         OwnableEvent: OwnableComponent::Event
     }
@@ -129,10 +120,10 @@ mod Factory {
         id: u32
     }
 
-    // @dev Emitted each time deposit is update via update_creation_deposit
+    // @dev Emitted each time CreationFee is update via update_creation_fee
     #[derive(Drop, starknet::Event)]
-    struct DepositUpdated {
-        new_deposit: u256
+    struct CreationFeeUpdated {
+        new_fee: u256
     }
 
 
@@ -142,20 +133,21 @@ mod Factory {
 
     // @notice Contract constructor
     #[constructor]
-    fn constructor(ref self: ContractState, organisation_contract_class_hash: ClassHash, guild_contract_class_hash: ClassHash, treasury_contract_class_hash: ClassHash, salary_contract_class_hash: ClassHash, owner: ContractAddress) {
+    fn constructor(ref self: ContractState, organisation_contract_class_hash: ClassHash, guild_contract_class_hash: ClassHash, permission_manager_contract_class_hash: ClassHash, treasury_contract_class_hash: ClassHash, salary_contract_class_hash: ClassHash, owner: ContractAddress) {
         assert(!organisation_contract_class_hash.is_zero(), 'can not be zero');
         assert(!guild_contract_class_hash.is_zero(), 'can not be zero');
+        assert(!permission_manager_contract_class_hash.is_zero(), 'can not be zero');
         assert(!treasury_contract_class_hash.is_zero(), 'can not be zero');
         assert(!salary_contract_class_hash.is_zero(), 'can not be zero');
 
         self._organisation_contract_class_hash.write(organisation_contract_class_hash);
         self._guild_contract_class_hash.write(guild_contract_class_hash);
+        self._permission_manager_contract_class_hash.write(permission_manager_contract_class_hash);
         self._treasury_contract_class_hash.write(treasury_contract_class_hash);
         self._salary_contract_class_hash.write(salary_contract_class_hash);
         self._num_of_organisations.write(0);
-        self._creation_deposit.write(100000000000000000); // 0.1 ETH
-        self._lock_duration.write(7890000); // 3 months
-        self._deposit_token.write(0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7.try_into().unwrap()); // 3 months
+        self._creation_fee.write(100000000000000000); // 0.1 ETH -> this fee will go for the development of coordination-stack
+        self._fee_token.write(0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7.try_into().unwrap()); // 3 months
 
         self.ownable_storage.initializer(owner);
     }
@@ -166,12 +158,8 @@ mod Factory {
         // Getters
         //
 
-        fn get_creation_deposit(self: @ContractState) -> u256 {
-            self._creation_deposit.read()
-        }
-
-        fn get_lock_duration(self: @ContractState) -> u64 {
-            self._lock_duration.read()
+        fn get_creation_fee(self: @ContractState) -> u256 {
+            self._creation_fee.read()
         }
 
         // @notice Get all the organisations registered
@@ -194,6 +182,7 @@ mod Factory {
         // @notice Get all the organisations registered
         // @return all_organisations_len Length of `all_organisations` array
         // @return all_organisations Array of Organisations of the registered organisations
+        // @Notice This function is required for frontend until indexer is live
         fn get_all_organisations_details(self: @ContractState) -> (u32, Array::<Organisation>) { 
             let mut all_organisations_array = ArrayTrait::<Organisation>::new();
             let num_organisations = self._num_of_organisations.read();
@@ -237,21 +226,27 @@ mod Factory {
             self._treasury_contract_class_hash.read()
         }
 
-        // @notice Get the class hash of the Salary contract which is deployed for each salary.
+        // @notice Get the class hash of the Salary contract which is deployed for each salary distributor.
         // @return class_hash
         fn get_salary_contract_class_hash(self: @ContractState) -> ClassHash {
             self._salary_contract_class_hash.read()
+        }
+
+        // @notice Get the class hash of the permission manager contract which is deployed for each organisation.
+        // @return class_hash
+        fn get_permission_manager_contract_class_hash(self: @ContractState) -> ClassHash {
+            self._permission_manager_contract_class_hash.read()
         }
 
         //
         // Setters
         //
 
-        fn update_creation_deposit(ref self: ContractState, new_deposit: u256) {
+        fn update_creation_fee(ref self: ContractState, new_fee: u256) {
             self.ownable_storage.assert_only_owner();
-            self._creation_deposit.write(new_deposit);
+            self._creation_fee.write(new_fee);
 
-            self.emit(DepositUpdated {new_deposit: new_deposit});
+            self.emit(CreationFeeUpdated {new_fee: new_fee});
 
         }
         fn create_organisation(ref self: ContractState, name: felt252, metadata: Span<felt252> ) -> ContractAddress {
@@ -260,10 +255,10 @@ mod Factory {
             let factory = get_contract_address();
             let block_timestamp = get_block_timestamp();
 
-            let token = self._deposit_token.read();
-            let deposit_amount = self._creation_deposit.read();
+            let token = self._fee_token.read();
+            let fee_amount = self._creation_fee.read();
             let token_dispatcher = IERC20Dispatcher {contract_address: token};
-            token_dispatcher.transfer_from(caller, factory, deposit_amount);
+            token_dispatcher.transfer_from(caller, factory, fee_amount);
             
             let organisation_contract_class_hash = self._organisation_contract_class_hash.read();
 
@@ -282,36 +277,21 @@ mod Factory {
             self._all_organisations.write(num_organisations + 1, organisation);
             self._num_of_organisations.write(num_organisations + 1);
 
-            let deposit = Deposit {amount: deposit_amount, creation_timestamp: block_timestamp, claimed: false };
-            self._deposits.write(organisation, deposit);
-
             self.emit(OrganisationCreated {name: name, organisation: organisation, id: num_organisations + 1});
 
             organisation
 
         }
 
-        fn withdraw_deposit(ref self: ContractState, organisation: ContractAddress, receipent: ContractAddress) {
-            let mut deposit = self._deposits.read(organisation);
-            assert(!deposit.amount.is_zero(), 'DEPOSIT_NOT_FOUND');
-            assert(!deposit.claimed, 'ALREADY_CLAIMED');
+        fn withdraw_fee(ref self: ContractState, receipent: ContractAddress) {
+            self.ownable_storage.assert_only_owner();
+            let current_contract = get_contract_address();
 
-            let block_timestamp = get_block_timestamp();
-            let lock_duration = self._lock_duration.read();
-            assert(deposit.creation_timestamp + lock_duration > block_timestamp, 'LOCK_NOT_EXPIRED');
-
-            let caller = get_caller_address();
-            let organisation_dispatcher = IOrganisationDispatcher {contract_address: organisation};
-            let organisation_owner = organisation_dispatcher.owner();
-            assert(caller == organisation_owner, 'UNAITHORISED');
-
-            deposit.claimed = true;
-            self._deposits.write(organisation, deposit);
-
-            let token = self._deposit_token.read();
+            let token = self._fee_token.read();
             let token_dispatcher = IERC20Dispatcher {contract_address: token};
-            token_dispatcher.transfer(receipent, deposit.amount);
-
+            // TODO: whether to call balanceOf or balance_of
+            let balance = token_dispatcher.balanceOf(current_contract);
+            token_dispatcher.transfer(receipent, balance);
 
         }
 
@@ -351,6 +331,15 @@ mod Factory {
             self.ownable_storage.assert_only_owner();
             assert(!new_salary_contract_class.is_zero(), 'must be non zero');
             self._salary_contract_class_hash.write(new_salary_contract_class);
+        }
+
+        // @notice This replaces _permission_manager_class_hash used to deploy new pemrission manager
+        // @dev Only owner can call
+        // @param new_permission_manager_contract_class New _permission_manager_contract_class_hash
+        fn replace_permission_manager_contract_hash(ref self: ContractState, new_permission_manager_contract_class: ClassHash) {
+            self.ownable_storage.assert_only_owner();
+            assert(!new_permission_manager_contract_class.is_zero(), 'must be non zero');
+            self._permission_manager_contract_class_hash.write(new_permission_manager_contract_class);
         }
 
         // @notice This is used upgrade (Will push a upgrade without this to finalize)
