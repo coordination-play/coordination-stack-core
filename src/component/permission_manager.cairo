@@ -88,19 +88,6 @@ mod PermissionManagerComponent {
         where: ContractAddress,
         permission_id: felt252
     }
-    //
-    // Constructor
-    //
-
-    // // @notice Contract constructor
-    // #[constructor]
-    // fn constructor(ref self: ContractState, owner: ContractAddress) {
-    //     let current_contract = get_contract_address();
-    //     let caller = get_caller_address();
-    //     InternalImpl::_grant(ref self, current_contract, owner, ROOT_PERMISSION_ID);
-    //     InternalImpl::_grant(ref self, current_contract, caller, ROOT_PERMISSION_ID);
-
-    // }
 
 
     #[embeddable_as(PermissionManagerImpl)]

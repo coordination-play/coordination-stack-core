@@ -3,7 +3,6 @@ mod organisation;
 mod guild;
 mod salary_distributor;
 mod treasury;
-mod permission_manager;
 mod utils {
     mod array_storage;
     mod span_storage;
