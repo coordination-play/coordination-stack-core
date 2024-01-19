@@ -1,5 +1,5 @@
-// @title Mesh Salary contract Cairo 2.4.1
-// @author Mesh Finance
+// @title Salary contract Cairo 2.4.1
+// @author Yash (tg-@yashm001)
 // @license MIT
 // @notice Contract to disburse salary to contibutors
 
@@ -73,13 +73,13 @@ mod SalaryDistributor {
     use super::{
         IERC20Dispatcher, IERC20DispatcherTrait, IOrganisationDispatcher, IOrganisationDispatcherTrait
     };
-    use openzeppelin::access::ownable::OwnableComponent;
-    component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);
+    // use openzeppelin::access::ownable::OwnableComponent;
+    // component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);
 
-    #[abi(embed_v0)]
-    impl OwnableImpl = OwnableComponent::OwnableImpl<ContractState>;
+    // #[abi(embed_v0)]
+    // impl OwnableImpl = OwnableComponent::OwnableImpl<ContractState>;
     
-    impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
+    // impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
 
 
     // for debugging will remove after review
@@ -96,8 +96,8 @@ mod SalaryDistributor {
         _last_update_month_id_contributor: LegacyMap::<ContractAddress, u32>, // @dev to avoid unnecessary calculation of cum_salary
         _last_update_month_id: u32, // @dev to avoid unnecessary calculation of cum_salary
         _organisation: ContractAddress, // @dev organisation contract address
-        #[substorage(v0)]
-        ownable_storage: OwnableComponent::Storage
+        // #[substorage(v0)]
+        // ownable_storage: OwnableComponent::Storage
     }
 
     #[event]
@@ -106,8 +106,8 @@ mod SalaryDistributor {
         CumulativeSalaryUpdated: CumulativeSalaryUpdated,
         SalaryPoolAdded: SalaryPoolAdded,
         SalaryClaimed: SalaryClaimed,
-        #[flat]
-        OwnableEvent: OwnableComponent::Event
+        // #[flat]
+        // OwnableEvent: OwnableComponent::Event
     }
 
     // @notice An event emitted whenever contributor cum salary is updated
@@ -143,7 +143,7 @@ mod SalaryDistributor {
         // self._token.write(contract_address_const::<0x005a643907b9a4bc6a55e9069c4fd5fd1f5c79a22470690f75556c4736e34426>()); // USDC
         self._organisation.write(organisation);
 
-        self.ownable_storage.initializer(owner)
+        // self.ownable_storage.initializer(owner)
 
     }
 

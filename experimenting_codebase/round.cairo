@@ -1,5 +1,5 @@
 // @title Round contract
-// @author __________________
+// @author Yash (tg-@yashm001)
 // @license MIT
 // @notice Round contract to raise funds
 // use std::time::{SystemTime, UNIX_EPOCH};

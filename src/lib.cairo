@@ -1,18 +1,14 @@
-// mod access;
-mod array_storage;
-mod span_storage;
-mod utils;
 mod factory;
 mod organisation;
 mod guild;
-mod salary;
-mod guildSBT;
+mod salary_distributor;
 mod treasury;
-// mod round;
-// mod shares;
-// mod usdc;
+mod permission_manager;
+mod utils {
+    mod array_storage;
+    mod span_storage;
+}
 
-// mod libraries {
-//     mod price_curve;
-// }
-mod simple;
+mod component {
+    mod permission_manager;
+}
