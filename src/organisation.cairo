@@ -1,5 +1,5 @@
 // @title Coordination-stack Organisation in Cairo 2.4.1
-// @author Mesh Finance
+// @author Yash (tg - @yashm001)
 // @license MIT
 // @notice Organisation, main contract for each org and to store contribution points
 
@@ -37,6 +37,7 @@ trait IFactory<TContractState> {
 }
 
 
+
 //
 // Contract Interface
 //
@@ -53,15 +54,15 @@ trait IOrganisation<TContractState> {
     fn get_guild_points(self: @TContractState, contributor: ContractAddress, guild: ContractAddress) -> u32;
     fn get_guild_contribution_for_month(self: @TContractState, contributor: ContractAddress, month_id: u32, guild: ContractAddress) -> u32;
     fn get_migartion_queued_state(self: @TContractState, hash: felt252 ) -> bool;
-    fn get_salary_contract(self: @TContractState) -> ContractAddress;
+    fn get_salary_distributor_contract(self: @TContractState) -> ContractAddress;
     fn get_treasury(self: @TContractState) -> ContractAddress;
 
     // external functions
     fn add_guild(ref self: TContractState, guild_name: felt252, owner: ContractAddress) -> ContractAddress;
     fn update_organisation_name(ref self: TContractState, new_name: felt252);
     fn update_organisation_metadata(ref self: TContractState, new_metadata: Span<felt252>);
-    fn update_salary_contract(ref self: TContractState, owner: ContractAddress, token: ContractAddress);
-    fn update_treasury_contract(ref self: TContractState, owner: ContractAddress);
+    fn update_salary_distributor_contract(ref self: TContractState, token: ContractAddress);
+    fn add_treasury_contract(ref self: TContractState, owner: ContractAddress);
     fn migrate_points_initiated_by_holder(ref self: TContractState, new_address: ContractAddress);
     fn execute_migrate_points_initiated_by_holder(ref self: TContractState, old_address: ContractAddress, new_address: ContractAddress);
 
@@ -70,29 +71,26 @@ trait IOrganisation<TContractState> {
 
 #[starknet::contract]
 mod Organisation {
-    use traits::Into; // TODO remove intos when u256 inferred type is available
-    use option::OptionTrait;
-    use array::{ArrayTrait, SpanTrait};
-    use result::ResultTrait;
-    use zeroable::Zeroable;
     use hash::LegacyHash;
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
-    use integer::{u128_try_from_felt252, u256_sqrt, u256_from_felt252};
     use starknet::syscalls::{replace_class_syscall, deploy_syscall};
-    use coordination_stack_core::span_storage::StoreSpanFelt252;
+    use coordination_stack_core::utils::span_storage::StoreSpanFelt252;
 
     use super::{Guild, IGuildDispatcher, IGuildDispatcherTrait, IFactoryDispatcher, IFactoryDispatcherTrait};
 
-    use openzeppelin::access::ownable::OwnableComponent;
+    use coordination_stack_core::component::permission_manager::PermissionManagerComponent;
 
-    component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);
+    component!(path: PermissionManagerComponent, storage: permission_manager_storage, event: PermissionManagerEvent);
 
     #[abi(embed_v0)]
-    impl OwnableImpl = OwnableComponent::OwnableImpl<ContractState>;
+    impl OwnableImpl = PermissionManagerComponent::PermissionManagerImpl<ContractState>;
     
-    impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
+    impl OwnableInternalImpl = PermissionManagerComponent::InternalImpl<ContractState>;
 
 
+    const MODERATOR_ID: felt252 = 'MODERATOR';
+    const MIGRATION_AUTHORISER_ID: felt252 = 'MIGRATION_AUTHORISER';
+    const ROOT_PERMISSION_ID: felt252 = 'ROOT_PERMISSION';
     //
     // Storage Organisation
     //
@@ -106,10 +104,10 @@ mod Organisation {
         _guilds_id: LegacyMap::<ContractAddress, u8>, // @dev  mapping to store (Guild address => Id)
         _queued_migrations: LegacyMap::<felt252, bool>, // @dev flag to store queued migration requests.
         _salary_contract_class_hash: ClassHash,
-        _salary: ContractAddress, // @dev salary contract to payout salary.
+        _salary_distributor: ContractAddress, // @dev salary contract to payout salary.
         _treasury: ContractAddress, // @dev Treasury contract to manage org funds.
         #[substorage(v0)]
-        ownable_storage: OwnableComponent::Storage
+        permission_manager_storage: PermissionManagerComponent::Storage
     }
 
     #[event]
@@ -121,7 +119,7 @@ mod Organisation {
         NameChanged: NameChanged,
         MetadataUpdated: MetadataUpdated,
         #[flat]
-        OwnableEvent: OwnableComponent::Event
+        PermissionManagerEvent: PermissionManagerComponent::Event
     }
 
 
@@ -173,7 +171,7 @@ mod Organisation {
         self._metadata.write(metadata);
         self._factory.write(factory);
 
-        self.ownable_storage.initializer(owner)
+        self.permission_manager_storage.initializer(owner);
 
     }
 
@@ -210,6 +208,7 @@ mod Organisation {
         // @notice Get all the guilds registered
         // @return all_guilds_len Length of `all_guilds` array
         // @return all_guilds Array of Guild of all guilds
+        // @Notice This function is required for frontend until indexer is live
         fn get_all_guilds_details(self: @ContractState) -> (u8, Array::<Guild>) { 
             let mut all_guilds_array = ArrayTrait::<Guild>::new();
             let num_guilds = self._num_of_guilds.read();
@@ -271,8 +270,8 @@ mod Organisation {
         }
 
 
-        fn get_salary_contract(self: @ContractState) -> ContractAddress {
-            self._salary.read()
+        fn get_salary_distributor_contract(self: @ContractState) -> ContractAddress {
+            self._salary_distributor.read()
         }
 
         fn get_treasury(self: @ContractState) -> ContractAddress {
@@ -284,7 +283,8 @@ mod Organisation {
         //
 
         fn add_guild(ref self: ContractState, guild_name: felt252, owner: ContractAddress) -> ContractAddress {
-            self.ownable_storage.assert_only_owner();
+            // self.ownable_storage.assert_only_owner();
+            InternalImpl::_auth(ref self, ROOT_PERMISSION_ID);
             let current_contract = get_contract_address();
             let factory = self._factory.read();
             let factory_dispatcher = IFactoryDispatcher {contract_address: factory};
@@ -293,12 +293,15 @@ mod Organisation {
             let mut constructor_calldata = Default::default();
             Serde::serialize(@guild_name, ref constructor_calldata);
             Serde::serialize(@current_contract, ref constructor_calldata);
-            Serde::serialize(@owner, ref constructor_calldata);
+            // Serde::serialize(@owner, ref constructor_calldata);
 
             let syscall_result = deploy_syscall(
                 guild_contract_class_hash, 0, constructor_calldata.span(), false
             );
             let (guild, _) = syscall_result.unwrap_syscall();
+
+            // Giving guild root priviledges to owner of Guild
+            self.permission_manager_storage.grant(guild, owner, ROOT_PERMISSION_ID);
 
             let num_guilds = self._num_of_guilds.read();
             // self._guilds.write(guild_name, num_guilds + 1);
@@ -312,7 +315,8 @@ mod Organisation {
         }
 
         fn update_organisation_name(ref self: ContractState, new_name: felt252) {
-            self.ownable_storage.assert_only_owner();
+            // self.ownable_storage.assert_only_owner();
+            InternalImpl::_auth(ref self, MODERATOR_ID);
             let current_name = self._name.read();
             self._name.write(new_name);
 
@@ -320,7 +324,8 @@ mod Organisation {
         }
 
         fn update_organisation_metadata(ref self: ContractState, new_metadata: Span<felt252>) {
-            self.ownable_storage.assert_only_owner();
+            // self.ownable_storage.assert_only_owner();
+            InternalImpl::_auth(ref self, MODERATOR_ID);
             let current_metadata = self._metadata.read();
             self._metadata.write(new_metadata);
 
@@ -328,15 +333,14 @@ mod Organisation {
         }
 
 
-        fn update_salary_contract(ref self: ContractState, owner: ContractAddress, token: ContractAddress) {
-            self.ownable_storage.assert_only_owner();
+        fn update_salary_distributor_contract(ref self: ContractState, token: ContractAddress) {
+            InternalImpl::_auth(ref self, ROOT_PERMISSION_ID);
             let current_contract = get_contract_address();
             let factory = self._factory.read();
             let factory_dispatcher = IFactoryDispatcher {contract_address: factory};
             let salary_contract_class_hash = factory_dispatcher.get_salary_contract_class_hash();
 
             let mut constructor_calldata = Default::default();
-            Serde::serialize(@owner, ref constructor_calldata);
             Serde::serialize(@token, ref constructor_calldata);
             Serde::serialize(@current_contract, ref constructor_calldata);
 
@@ -344,18 +348,19 @@ mod Organisation {
                 salary_contract_class_hash, 0, constructor_calldata.span(), false
             );
             let (salary, _) = syscall_result.unwrap_syscall();
-            self._salary.write(salary);
+            self._salary_distributor.write(salary);
         }
 
-        fn update_treasury_contract(ref self: ContractState, owner: ContractAddress) {
-            self.ownable_storage.assert_only_owner();
+        fn add_treasury_contract(ref self: ContractState, owner: ContractAddress) {
+            InternalImpl::_auth(ref self, ROOT_PERMISSION_ID);
+            (assert(self._treasury.read().is_zero(), 'ALREADY_EXISTS'));
+            
             let current_contract = get_contract_address();
             let factory = self._factory.read();
             let factory_dispatcher = IFactoryDispatcher {contract_address: factory};
             let treasury_contract_class_hash = factory_dispatcher.get_treasury_contract_class_hash();
 
             let mut constructor_calldata = Default::default();
-            Serde::serialize(@owner, ref constructor_calldata);
             Serde::serialize(@current_contract, ref constructor_calldata);
 
             let syscall_result = deploy_syscall(
@@ -363,10 +368,14 @@ mod Organisation {
             );
             let (treasury, _) = syscall_result.unwrap_syscall();
             self._treasury.write(treasury);
+
+            // Giving root priviledges to owner of treasury 
+            self.permission_manager_storage.grant(treasury, owner, ROOT_PERMISSION_ID);
         }
+        
 
         fn migrate_points_initiated_by_holder(ref self: ContractState, new_address: ContractAddress) {
-            // TODO: if new address already have any contribution points, if yes return. 
+            // TODO: if new address already have any contribution points, if yes return.
             let caller = get_caller_address();
             let migration_hash: felt252 = LegacyHash::hash(caller.into(), new_address);
 
@@ -378,7 +387,7 @@ mod Organisation {
 
         // @Notice the function has only_owner modifier to prevent user to use this function to tranfer SBT anytime.
         fn execute_migrate_points_initiated_by_holder(ref self: ContractState, old_address: ContractAddress, new_address: ContractAddress) {
-            self.ownable_storage.assert_only_owner();
+            InternalImpl::_auth(ref self, MIGRATION_AUTHORISER_ID);
             let migration_hash: felt252 = LegacyHash::hash(old_address.into(), new_address);
             let is_queued = self._queued_migrations.read(migration_hash);
 
@@ -413,6 +422,13 @@ mod Organisation {
 
             self.emit(Migrated{old_address: old_address, new_address: new_address});
 
+        }
+
+        fn _auth(ref self: ContractState, permission_id: felt252) {
+            let caller = get_caller_address();
+            let current_contract = get_contract_address();
+            
+            assert(self.permission_manager_storage.is_granted(caller, current_contract, permission_id), 'UNAUTHORISED');
         }
 
     } 

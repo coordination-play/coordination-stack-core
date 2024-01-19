@@ -62,28 +62,14 @@ trait ISalaryDistributor<TContractState> {
 
 #[starknet::contract]
 mod SalaryDistributor {
-    use traits::Into; // TODO remove intos when u256 inferred type is available
-    use option::OptionTrait;
-    use array::ArrayTrait;
 
-    use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
-    use starknet::syscalls::{replace_class_syscall, call_contract_syscall};
+    use starknet::{ContractAddress, ClassHash, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
+    use starknet::syscalls::{replace_class_syscall};
     use super::ContributorSalary;
 
     use super::{
         IERC20Dispatcher, IERC20DispatcherTrait, IOrganisationDispatcher, IOrganisationDispatcherTrait
     };
-    // use openzeppelin::access::ownable::OwnableComponent;
-    // component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);
-
-    // #[abi(embed_v0)]
-    // impl OwnableImpl = OwnableComponent::OwnableImpl<ContractState>;
-    
-    // impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
-
-
-    // for debugging will remove after review
-    use debug::PrintTrait;
 
     //
     // Storage Organisation
@@ -96,8 +82,6 @@ mod SalaryDistributor {
         _last_update_month_id_contributor: LegacyMap::<ContractAddress, u32>, // @dev to avoid unnecessary calculation of cum_salary
         _last_update_month_id: u32, // @dev to avoid unnecessary calculation of cum_salary
         _organisation: ContractAddress, // @dev organisation contract address
-        // #[substorage(v0)]
-        // ownable_storage: OwnableComponent::Storage
     }
 
     #[event]
@@ -106,8 +90,6 @@ mod SalaryDistributor {
         CumulativeSalaryUpdated: CumulativeSalaryUpdated,
         SalaryPoolAdded: SalaryPoolAdded,
         SalaryClaimed: SalaryClaimed,
-        // #[flat]
-        // OwnableEvent: OwnableComponent::Event
     }
 
     // @notice An event emitted whenever contributor cum salary is updated
@@ -142,9 +124,6 @@ mod SalaryDistributor {
         self._token.write(token);
         // self._token.write(contract_address_const::<0x005a643907b9a4bc6a55e9069c4fd5fd1f5c79a22470690f75556c4736e34426>()); // USDC
         self._organisation.write(organisation);
-
-        // self.ownable_storage.initializer(owner)
-
     }
 
     #[external(v0)]
@@ -201,6 +180,7 @@ mod SalaryDistributor {
             };
             let token = self._token.read();
             let tokenDispatcher = IERC20Dispatcher { contract_address: token };
+            // TODO: whether to call transfer_from or transferFrom
             // tokenDispatcher.transfer_from(caller, contract_address, amount_to_transfer);
             tokenDispatcher.transferFrom(caller, contract_address, amount_to_transfer);
             self._last_update_month_id.write(month_id);

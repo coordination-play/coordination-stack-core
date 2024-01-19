@@ -1,5 +1,5 @@
 // @title Coordination-stack Guild in Cairo 2.4.1
-// @author Mesh Finance
+// @author Yash (tg-@yashm001)
 // @license MIT
 // @notice Guild, to store guilds contribution points;
 
@@ -13,6 +13,11 @@ struct MonthlyContribution {
     contributor: ContractAddress,
     // @notice Contribution for guilds
     point: u32,
+}
+
+#[starknet::interface]
+trait IOrganisation<TContractState> {
+    fn is_granted(self: @TContractState, where: ContractAddress, who: ContractAddress, permission_id: felt252) -> bool;
 }
 
 
@@ -39,29 +44,15 @@ trait IGuild<TContractState> {
 
 #[starknet::contract]
 mod Guild {
-    use traits::Into; // TODO remove intos when u256 inferred type is available
-    use option::OptionTrait;
-    use array::{ArrayTrait, SpanTrait};
-    use result::ResultTrait;
-    use zeroable::Zeroable;
-    use hash::LegacyHash;
-    use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
-    use integer::{u128_try_from_felt252, u256_sqrt, u256_from_felt252};
+    // use traits::Into; // TODO remove intos when u256 inferred type is available
+    use starknet::{ContractAddress, ClassHash, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use starknet::syscalls::{replace_class_syscall, call_contract_syscall};
-    use coordination_stack_core::array_storage::StoreFelt252Array;
-    use coordination_stack_core::array_storage::StoreU32Array;
+    use coordination_stack_core::utils::array_storage::StoreU32Array;
 
-    use super::{MonthlyContribution};
+    use super::{MonthlyContribution, IOrganisationDispatcher, IOrganisationDispatcherTrait};
 
-    use openzeppelin::access::ownable::OwnableComponent;
-
-    component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);
-
-    #[abi(embed_v0)]
-    impl OwnableImpl = OwnableComponent::OwnableImpl<ContractState>;
-    
-    impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
-
+    const ROOT_PERMISSION_ID: felt252 = 'ROOT_PERMISSION';
+    const POINTS_ALLOCATOR_ID: felt252 = 'POINTS_ALLOCATOR';
 
     //
     // Storage Guild
@@ -74,8 +65,6 @@ mod Guild {
         _contributions_data: LegacyMap::<ContractAddress, Array<u32>>, // @dev contributions data for specific contributor 
         _total_montly_contribution: LegacyMap::<u32, u32>, // @dev total contribution points allocated each month [month_id => points]
         _last_update_id: u32, // @dev contribution update id
-        #[substorage(v0)]
-        ownable_storage: OwnableComponent::Storage
     }
 
     #[event]
@@ -83,8 +72,6 @@ mod Guild {
     enum Event {
         ContributionUpdated: ContributionUpdated,
         Migrated: Migrated,
-        #[flat]
-        OwnableEvent: OwnableComponent::Event
     }
 
     // @notice An event emitted whenever contribution is updated
@@ -109,12 +96,9 @@ mod Guild {
 
     // @notice Contract constructor
     #[constructor]
-    fn constructor(ref self: ContractState, name: felt252, organisation: ContractAddress, owner: ContractAddress,) {
+    fn constructor(ref self: ContractState, name: felt252, organisation: ContractAddress) {
         self._name.write(name);
         self._organisation.write(organisation);
-
-        self.ownable_storage.initializer(owner)
-
     }
 
     #[external(v0)]
@@ -159,7 +143,8 @@ mod Guild {
         // Setters
         //
         fn update_contibutions(ref self: ContractState, month_id: u32, contributions: Array::<MonthlyContribution>) {
-            self.ownable_storage.assert_only_owner();
+            // self.ownable_storage.assert_only_owner();
+            InternalImpl::_auth(ref self, POINTS_ALLOCATOR_ID);
             let block_timestamp = get_block_timestamp();
             let mut current_index = 0;
 
@@ -232,6 +217,14 @@ mod Guild {
             let caller = get_caller_address();
             let organisation = self._organisation.read();
             assert(caller == organisation, 'NOT_ORGANISATION');
+        }
+
+        fn _auth(ref self: ContractState, permission_id: felt252) {
+            let caller = get_caller_address();
+            let current_contract = get_contract_address();
+
+            let organisation_dispatcher = IOrganisationDispatcher {contract_address: self._organisation.read()};            
+            assert(organisation_dispatcher.is_granted(caller, current_contract, permission_id), 'UNAUTHORISED');
         }
 
     } 

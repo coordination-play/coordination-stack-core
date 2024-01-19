@@ -1,5 +1,5 @@
 // @title Coordination-stack Treasury in Cairo 2.4.1
-// @author yash (tg-yashm001)
+// @author Yash (tg-yashm001)
 // @license MIT
 // @notice Treasury to manage organisation funds.
 
@@ -14,7 +14,9 @@ trait ISalaryDistributor<TContractState> {
 #[starknet::interface]
 trait IOrganisation<TContractState> {
     fn get_salary_contract(self: @TContractState) -> ContractAddress;
+    fn is_granted(self: @TContractState, where: ContractAddress, who: ContractAddress, permission_id: felt252) -> bool;
 }
+
 
 //
 // Contract Interface
@@ -30,23 +32,15 @@ trait ITreasury<TContractState> {
 
 #[starknet::contract]
 mod Treasury {
-    use traits::Into; // TODO remove intos when u256 inferred type is available
-    use option::OptionTrait;
-    use array::ArrayTrait;
-
     use starknet::{ContractAddress, ClassHash, SyscallResult, SyscallResultTrait, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use starknet::syscalls::{replace_class_syscall, call_contract_syscall};
 
     use super::{
        IOrganisationDispatcher, IOrganisationDispatcherTrait, ISalaryDistributorDispatcher, ISalaryDistributorDispatcherTrait
     };
-    use openzeppelin::access::ownable::OwnableComponent;
-    component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);
 
-    #[abi(embed_v0)]
-    impl OwnableImpl = OwnableComponent::OwnableImpl<ContractState>;
-    
-    impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
+    const ROOT_PERMISSION_ID: felt252 = 'ROOT_PERMISSION';
+    const SALARY_FUNDS_ALLOCATOR_ID: felt252 = 'SALARY_FUNDS_ALLOCATOR';
 
     //
     // Storage Organisation
@@ -54,16 +48,14 @@ mod Treasury {
     #[storage]
     struct Storage {
        _organisation: ContractAddress, // @dev organiation contact address
-        #[substorage(v0)]
-        ownable_storage: OwnableComponent::Storage
+
     }
 
-    #[event]
-    #[derive(Drop, starknet::Event)]
-    enum Event {
-        #[flat]
-        OwnableEvent: OwnableComponent::Event
-    }
+    // #[event]
+    // #[derive(Drop, starknet::Event)]
+    // enum Event {
+
+    // }
 
     //
     // Constructor
@@ -71,9 +63,8 @@ mod Treasury {
 
     // @notice Contract constructor
     #[constructor]
-    fn constructor(ref self: ContractState, owner: ContractAddress, token:ContractAddress, organisation: ContractAddress) {
+    fn constructor(ref self: ContractState, organisation: ContractAddress) {
         self._organisation.write(organisation);
-        self.ownable_storage.initializer(owner)
 
     }
 
@@ -85,7 +76,7 @@ mod Treasury {
         //
 
         fn allocate_funds_for_salary(ref self: ContractState, month_id: u32, amounts: Array<u256>, guilds: Array<ContractAddress>) {
-            self.ownable_storage.assert_only_owner();
+            InternalImpl::_auth(ref self, SALARY_FUNDS_ALLOCATOR_ID);
             let organisation = self._organisation.read();
             let organisation_dispatcher = IOrganisationDispatcher {contract_address: organisation};
             let salary_distributor = organisation_dispatcher.get_salary_contract();
@@ -94,11 +85,21 @@ mod Treasury {
         }
 
         fn execute_transaction(ref self: ContractState, target: ContractAddress, entry_point_selector: felt252, calldata: Span<felt252>) {
-            self.ownable_storage.assert_only_owner();
+            InternalImpl::_auth(ref self, ROOT_PERMISSION_ID);
             let mut result = call_contract_syscall(target, entry_point_selector, calldata);
             result.unwrap_syscall(); 
         }
 
 
+    }
+     #[generate_trait]
+    impl InternalImpl of InternalTrait {
+        fn _auth(ref self: ContractState, permission_id: felt252) {
+            let caller = get_caller_address();
+            let current_contract = get_contract_address();
+
+            let organisation_dispatcher = IOrganisationDispatcher {contract_address: self._organisation.read()};
+            assert(organisation_dispatcher.is_granted(caller, current_contract, permission_id), 'UNAUTHORISED');
+        }
     }
 }
