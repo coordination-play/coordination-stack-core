@@ -48,7 +48,6 @@ trait IFactory<TContractState> {
     fn get_guild_contract_class_hash(self: @TContractState) -> ClassHash;
     fn get_salary_contract_class_hash(self: @TContractState) -> ClassHash;
     fn get_treasury_contract_class_hash(self: @TContractState) -> ClassHash;
-    fn get_permission_manager_contract_class_hash(self: @TContractState) -> ClassHash;
     // external functions
     fn update_creation_fee(ref self: TContractState, new_fee: u256);
     fn create_organisation(ref self: TContractState, name: felt252, metadata: Span<felt252> ) -> ContractAddress;
@@ -58,7 +57,6 @@ trait IFactory<TContractState> {
     fn replace_implementation_class(ref self: TContractState, new_implementation_class: ClassHash);
     fn replace_salary_contract_hash(ref self: TContractState, new_salary_contract_class: ClassHash);
     fn replace_treasury_contract_hash(ref self: TContractState, new_treasury_contract_class: ClassHash);
-    fn replace_permission_manager_contract_hash(ref self: TContractState, new_permission_manager_contract_class: ClassHash);
 
 }
 
@@ -98,7 +96,6 @@ mod Factory {
         _guild_contract_class_hash: ClassHash,
         _salary_contract_class_hash: ClassHash,
         _treasury_contract_class_hash: ClassHash,
-        _permission_manager_contract_class_hash: ClassHash,
         #[substorage(v0)]
         ownable_storage: OwnableComponent::Storage
     }
@@ -133,16 +130,14 @@ mod Factory {
 
     // @notice Contract constructor
     #[constructor]
-    fn constructor(ref self: ContractState, organisation_contract_class_hash: ClassHash, guild_contract_class_hash: ClassHash, permission_manager_contract_class_hash: ClassHash, treasury_contract_class_hash: ClassHash, salary_contract_class_hash: ClassHash, owner: ContractAddress) {
+    fn constructor(ref self: ContractState, organisation_contract_class_hash: ClassHash, guild_contract_class_hash: ClassHash, treasury_contract_class_hash: ClassHash, salary_contract_class_hash: ClassHash, owner: ContractAddress) {
         assert(!organisation_contract_class_hash.is_zero(), 'can not be zero');
         assert(!guild_contract_class_hash.is_zero(), 'can not be zero');
-        assert(!permission_manager_contract_class_hash.is_zero(), 'can not be zero');
         assert(!treasury_contract_class_hash.is_zero(), 'can not be zero');
         assert(!salary_contract_class_hash.is_zero(), 'can not be zero');
 
         self._organisation_contract_class_hash.write(organisation_contract_class_hash);
         self._guild_contract_class_hash.write(guild_contract_class_hash);
-        self._permission_manager_contract_class_hash.write(permission_manager_contract_class_hash);
         self._treasury_contract_class_hash.write(treasury_contract_class_hash);
         self._salary_contract_class_hash.write(salary_contract_class_hash);
         self._num_of_organisations.write(0);
@@ -232,11 +227,6 @@ mod Factory {
             self._salary_contract_class_hash.read()
         }
 
-        // @notice Get the class hash of the permission manager contract which is deployed for each organisation.
-        // @return class_hash
-        fn get_permission_manager_contract_class_hash(self: @ContractState) -> ClassHash {
-            self._permission_manager_contract_class_hash.read()
-        }
 
         //
         // Setters
@@ -331,15 +321,6 @@ mod Factory {
             self.ownable_storage.assert_only_owner();
             assert(!new_salary_contract_class.is_zero(), 'must be non zero');
             self._salary_contract_class_hash.write(new_salary_contract_class);
-        }
-
-        // @notice This replaces _permission_manager_class_hash used to deploy new pemrission manager
-        // @dev Only owner can call
-        // @param new_permission_manager_contract_class New _permission_manager_contract_class_hash
-        fn replace_permission_manager_contract_hash(ref self: ContractState, new_permission_manager_contract_class: ClassHash) {
-            self.ownable_storage.assert_only_owner();
-            assert(!new_permission_manager_contract_class.is_zero(), 'must be non zero');
-            self._permission_manager_contract_class_hash.write(new_permission_manager_contract_class);
         }
 
         // @notice This is used upgrade (Will push a upgrade without this to finalize)
