@@ -163,26 +163,19 @@ mod SalaryDistributor {
             self._only_treasury();
             let caller = get_caller_address();
             let contract_address = get_contract_address();
-            let mut amount_to_transfer = 0;
             let mut current_index = 0;
-            assert(guilds.len() == amounts.len(), 'INVALID_INPUT');
             loop {
                 if (current_index == guilds.len()) {
                     break;
                 }
                 let pool_amount = self._salary_pool.read((month_id, *guilds[current_index]));
                 assert (pool_amount == 0, 'ALREADY_SET');
-                amount_to_transfer += *amounts[current_index];
                 self._salary_pool.write((month_id, *guilds[current_index]), *amounts[current_index]);
 
                 self.emit(SalaryPoolAdded{month_id: month_id, guild: *guilds[current_index], pool_amount: *amounts[current_index]});
                 current_index += 1;
             };
-            let token = self._token.read();
-            let tokenDispatcher = IERC20Dispatcher { contract_address: token };
-            // TODO: whether to call transfer_from or transferFrom
-            // tokenDispatcher.transfer_from(caller, contract_address, amount_to_transfer);
-            tokenDispatcher.transferFrom(caller, contract_address, amount_to_transfer);
+    
             self._last_update_month_id.write(month_id);
         }
 

@@ -36,7 +36,7 @@ trait IGuild<TContractState> {
 
 
     // external functions
-    fn update_contibutions(ref self: TContractState, month_id: u32, contributions: Array::<MonthlyContribution>);
+    fn update_contributions(ref self: TContractState, month_id: u32, contributions: Array::<MonthlyContribution>);
     fn migrate_points(ref self: TContractState, old_address: ContractAddress, new_address: ContractAddress);
 
 }
@@ -44,7 +44,6 @@ trait IGuild<TContractState> {
 
 #[starknet::contract]
 mod Guild {
-    // use traits::Into; // TODO remove intos when u256 inferred type is available
     use starknet::{ContractAddress, ClassHash, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use starknet::syscalls::{replace_class_syscall, call_contract_syscall};
     use coordination_stack_core::utils::array_storage::StoreU32Array;
@@ -142,8 +141,7 @@ mod Guild {
         //
         // Setters
         //
-        fn update_contibutions(ref self: ContractState, month_id: u32, contributions: Array::<MonthlyContribution>) {
-            // self.ownable_storage.assert_only_owner();
+        fn update_contributions(ref self: ContractState, month_id: u32, contributions: Array::<MonthlyContribution>) {
             InternalImpl::_auth(ref self, POINTS_ALLOCATOR_ID);
             let block_timestamp = get_block_timestamp();
             let mut current_index = 0;
