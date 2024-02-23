@@ -184,12 +184,12 @@ mod PermissionManagerComponent {
             let current_contract = get_contract_address();
             
             // check if caller have ROOT PERMISSION in target contract
-            if(self.is_granted(caller, where, ROOT_PERMISSION_ID)) {
+            if(self.is_granted(where, caller, ROOT_PERMISSION_ID)) {
                 return true;
             }
 
             // check if caller have ROOT PERMISSION in permission manager contract
-            if(self.is_granted(caller, current_contract, ROOT_PERMISSION_ID)) {
+            if(self.is_granted(current_contract, caller, ROOT_PERMISSION_ID)) {
                 return true;
             }
 

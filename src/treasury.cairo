@@ -25,7 +25,7 @@ trait ISalaryDistributor<TContractState> {
 
 #[starknet::interface]
 trait IOrganisation<TContractState> {
-    fn get_salary_contract(self: @TContractState) -> ContractAddress;
+    fn get_salary_distributor_contract(self: @TContractState) -> ContractAddress;
     fn is_granted(self: @TContractState, where: ContractAddress, who: ContractAddress, permission_id: felt252) -> bool;
 }
 
@@ -103,7 +103,7 @@ mod Treasury {
             };
             let organisation = self._organisation.read();
             let organisation_dispatcher = IOrganisationDispatcher {contract_address: organisation};
-            let salary_distributor = organisation_dispatcher.get_salary_contract();
+            let salary_distributor = organisation_dispatcher.get_salary_distributor_contract();
             let salary_distributor_dispatcher = ISalaryDistributorDispatcher {contract_address: salary_distributor};
             
 
@@ -129,7 +129,7 @@ mod Treasury {
             let current_contract = get_contract_address();
 
             let organisation_dispatcher = IOrganisationDispatcher {contract_address: self._organisation.read()};
-            assert(organisation_dispatcher.is_granted(caller, current_contract, permission_id), 'UNAUTHORISED');
+            assert(organisation_dispatcher.is_granted(current_contract, caller, permission_id), 'UNAUTHORISED');
         }
     }
 }

@@ -428,7 +428,7 @@ mod Organisation {
             let caller = get_caller_address();
             let current_contract = get_contract_address();
             
-            assert(self.permission_manager_storage.is_granted(caller, current_contract, permission_id), 'UNAUTHORISED');
+            assert(self.permission_manager_storage.is_granted(current_contract, caller, permission_id), 'UNAUTHORISED');
         }
 
     } 

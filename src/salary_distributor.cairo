@@ -120,7 +120,7 @@ mod SalaryDistributor {
 
     // @notice Contract constructor
     #[constructor]
-    fn constructor(ref self: ContractState, owner: ContractAddress, token:ContractAddress, organisation: ContractAddress) {
+    fn constructor(ref self: ContractState, token:ContractAddress, organisation: ContractAddress) {
         self._token.write(token);
         // self._token.write(contract_address_const::<0x005a643907b9a4bc6a55e9069c4fd5fd1f5c79a22470690f75556c4736e34426>()); // USDC
         self._organisation.write(organisation);

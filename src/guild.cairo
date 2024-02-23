@@ -222,7 +222,7 @@ mod Guild {
             let current_contract = get_contract_address();
 
             let organisation_dispatcher = IOrganisationDispatcher {contract_address: self._organisation.read()};            
-            assert(organisation_dispatcher.is_granted(caller, current_contract, permission_id), 'UNAUTHORISED');
+            assert(organisation_dispatcher.is_granted(current_contract, caller, permission_id), 'UNAUTHORISED');
         }
 
     } 

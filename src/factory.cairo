@@ -114,6 +114,7 @@ mod Factory {
     struct OrganisationCreated {
         name: felt252, 
         organisation: ContractAddress,
+        metadata: Span<felt252>,
         id: u32
     }
 
@@ -267,7 +268,7 @@ mod Factory {
             self._all_organisations.write(num_organisations + 1, organisation);
             self._num_of_organisations.write(num_organisations + 1);
 
-            self.emit(OrganisationCreated {name: name, organisation: organisation, id: num_organisations + 1});
+            self.emit(OrganisationCreated {name: name, organisation: organisation, metadata: metadata, id: num_organisations + 1});
 
             organisation
 
