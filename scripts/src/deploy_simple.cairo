@@ -3,11 +3,11 @@ use sncast_std::{
 };
 use starknet::{ ContractAddress, ClassHash };
 use debug::PrintTrait;
-use scripts::utils::{owner};
+use deploy_scripts::utils::{owner};
 
 fn main() {
-    let max_fee = 9999999;
-    let salt = 0x6;
+    let max_fee = 999999999999999;
+    let salt = 0x7;
     let nonce = get_nonce('latest');
     nonce.print();
 
@@ -15,7 +15,7 @@ fn main() {
     let simple_class_hash = simple_declare_result.class_hash;
     let mut simple_constructor_data = Default::default();
 
-    let simple_deploy_result = deploy(simple_class_hash, simple_constructor_data, Option::Some(salt), true, Option::Some(max_fee), Option::Some(nonce));
+    let simple_deploy_result = deploy(simple_class_hash, simple_constructor_data, Option::Some(salt), true, Option::Some(max_fee), Option::None);
     let simple_contract_address = simple_deploy_result.contract_address;
 
     'simple Deployed to '.print();

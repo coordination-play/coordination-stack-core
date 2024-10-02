@@ -10,7 +10,7 @@ use coordination_stack_core::guildSBT::{MonthlyContribution};
 fn main() {
 
     let max_fee = 999999999999999;
-    let contract_address: ContractAddress = 0x0522ee5ec7ed95fde8bff3cdcc015a5445b79291f75e074b599302b58cbd94ea
+    let contract_address: ContractAddress = 0x00e56a30aa1a0051088468d6fe5bf6042e4c6b6d0abc11f03065d6f60580d3f1
         .try_into()
         .expect('Invalid contract address value');
 

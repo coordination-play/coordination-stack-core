@@ -126,7 +126,7 @@ mod SalaryDistributor {
         self._organisation.write(organisation);
     }
 
-    #[external(v0)]
+    #[abi(embed_v0)]
     impl SalaryDistributor of super::ISalaryDistributor<ContractState> {
         //
         // Getters
@@ -161,8 +161,6 @@ mod SalaryDistributor {
 
         fn add_fund_to_salary_pools(ref self: ContractState, month_id: u32, amounts: Array<u256>, guilds: Array<ContractAddress>) {
             self._only_treasury();
-            let caller = get_caller_address();
-            let contract_address = get_contract_address();
             let mut current_index = 0;
             loop {
                 if (current_index == guilds.len()) {

@@ -44,7 +44,8 @@ trait IGuild<TContractState> {
 
 #[starknet::contract]
 mod Guild {
-    use starknet::{ContractAddress, ClassHash, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
+    use core::array::ArrayTrait;
+use starknet::{ContractAddress, ClassHash, get_caller_address, get_contract_address, get_block_timestamp, contract_address_const};
     use starknet::syscalls::{replace_class_syscall, call_contract_syscall};
     use coordination_stack_core::utils::array_storage::StoreU32Array;
 
@@ -58,9 +59,13 @@ mod Guild {
     //
     #[storage]
     struct Storage {
-        _name: felt252, // @dev name of the organisation
+        _name: felt252, // @dev name of the guild
         _organisation: ContractAddress, // @dev oragnisation contract address
         _contributions: LegacyMap::<ContractAddress, u32>, // @dev cum contributions points for each contributor 
+        // @reviewer - another way to store _contributions_data is LegacyMap::<(ContractAddress, u32), u32>, 
+        // it will save gas cost will fetching contribution for a specfic month id
+        // but will be expensive and difficult to get all the contribution on-chain (by another contract), 
+        // PS: off-chain can fetched from indexeer 
         _contributions_data: LegacyMap::<ContractAddress, Array<u32>>, // @dev contributions data for specific contributor 
         _total_montly_contribution: LegacyMap::<u32, u32>, // @dev total contribution points allocated each month [month_id => points]
         _last_update_id: u32, // @dev contribution update id
@@ -100,7 +105,7 @@ mod Guild {
         self._organisation.write(organisation);
     }
 
-    #[external(v0)]
+    #[abi(embed_v0)]
     impl Guild of super::IGuild<ContractState> {
         //
         // Getters
@@ -143,7 +148,6 @@ mod Guild {
         //
         fn update_contributions(ref self: ContractState, month_id: u32, contributions: Array::<MonthlyContribution>) {
             InternalImpl::_auth(ref self, POINTS_ALLOCATOR_ID);
-            let block_timestamp = get_block_timestamp();
             let mut current_index = 0;
 
             // for keeping track of cummulative guild points for that month.
@@ -203,10 +207,17 @@ mod Guild {
             let new_guild_score = old_guild_score + new_contribution_score;
             if(new_contribution_score != 0) {
                 let mut contribution_data = self._contributions_data.read(contributor);
-                    contribution_data.append(month_id);
-                    contribution_data.append(new_contribution_score);
+                // check if contibution already exists for month id
+                // if yes, skip (TODO: add a challenge window in newer version)
+                // @reviwer checking only the last month_id, assuming months are uploaded forward monthwise only
+                let last_contributed_month_id = *contribution_data.at(contribution_data.len() - 2);
+                if last_contributed_month_id == month_id {
+                    return (old_guild_score);
+                }
+                contribution_data.append(month_id);
+                contribution_data.append(new_contribution_score);
 
-                    self._contributions_data.write(contributor, contribution_data);
+                self._contributions_data.write(contributor, contribution_data);
             }
             (new_guild_score)
         }

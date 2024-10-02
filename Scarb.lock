@@ -11,10 +11,10 @@ dependencies = [
 
 [[package]]
 name = "openzeppelin"
-version = "0.8.0"
-source = "git+https://github.com/openzeppelin/cairo-contracts?tag=v0.8.0#c23e8e96de60e6e3159b1ff8591a1187269c0eb7"
+version = "0.11.0"
+source = "git+https://github.com/openzeppelin/cairo-contracts?tag=v0.11.0#a83f36b23f1af6e160288962be4a2701c3ecbcda"
 
 [[package]]
 name = "snforge_std"
-version = "0.1.0"
-source = "git+https://github.com/foundry-rs/starknet-foundry.git?tag=v0.13.1#e1412ed040d10e66be0fd84115f72a667b57a116"
+version = "0.21.0"
+source = "git+https://github.com/foundry-rs/starknet-foundry.git?tag=v0.21.0#2996b8c1dd66b2715fc67e69578089f278a46790"

@@ -7,6 +7,8 @@ use starknet::ContractAddress;
 use array::Array;
 use starknet::ClassHash;
 use coordination_stack_core::utils::span_storage::StoreSpanFelt252;
+// use super::utils::storage_array::StorageArray;
+// use super::utils::storage_array::StorageArrayTrait;
 
 #[derive(Copy, Drop, Serde, starknet::Store)]
 struct Organisation {
@@ -54,9 +56,9 @@ trait IFactory<TContractState> {
     fn withdraw_fee(ref self: TContractState, receipent: ContractAddress);
     fn replace_organisation_contract_hash(ref self: TContractState, new_organisation_contract_class: ClassHash);
     fn replace_guild_contract_hash(ref self: TContractState, new_guild_contract_class: ClassHash);
-    fn replace_implementation_class(ref self: TContractState, new_implementation_class: ClassHash);
     fn replace_salary_contract_hash(ref self: TContractState, new_salary_contract_class: ClassHash);
     fn replace_treasury_contract_hash(ref self: TContractState, new_treasury_contract_class: ClassHash);
+    fn upgrade(ref self: TContractState, new_class_hash: ClassHash);
 
 }
 
@@ -75,12 +77,16 @@ mod Factory {
     use super::{Organisation, IERC20Dispatcher, IERC20DispatcherTrait, IOrganisationDispatcher, IOrganisationDispatcherTrait};
     use coordination_stack_core::utils::span_storage::StoreSpanFelt252;
     use openzeppelin::access::ownable::OwnableComponent;
+    use openzeppelin::upgrades::upgradeable::UpgradeableComponent;
+
+    component!(path: UpgradeableComponent, storage: upgradeable_storage, event: UpgradeableEvent);
     component!(path: OwnableComponent, storage: ownable_storage, event: OwnableEvent);
 
     #[abi(embed_v0)]
     impl OwnableImpl = OwnableComponent::OwnableImpl<ContractState>;
     
     impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
+    impl UpgradeableInternalImpl = UpgradeableComponent::InternalImpl<ContractState>;
 
 
     //
@@ -97,7 +103,9 @@ mod Factory {
         _salary_contract_class_hash: ClassHash,
         _treasury_contract_class_hash: ClassHash,
         #[substorage(v0)]
-        ownable_storage: OwnableComponent::Storage
+        ownable_storage: OwnableComponent::Storage,
+        #[substorage(v0)]
+        upgradeable_storage: UpgradeableComponent::Storage,
     }
 
     #[event]
@@ -106,7 +114,9 @@ mod Factory {
         OrganisationCreated: OrganisationCreated,
         CreationFeeUpdated: CreationFeeUpdated,
         #[flat]
-        OwnableEvent: OwnableComponent::Event
+        OwnableEvent: OwnableComponent::Event,
+        #[flat]
+        UpgradeableEvent: UpgradeableComponent::Event,
     }
 
     // @dev Emitted each time an organisation is created via create_organisation
@@ -148,7 +158,7 @@ mod Factory {
         self.ownable_storage.initializer(owner);
     }
 
-    #[external(v0)]
+    #[abi(embed_v0)]
     impl Factory of super::IFactory<ContractState> {
         //
         // Getters
@@ -244,7 +254,6 @@ mod Factory {
             assert(!name.is_zero(), 'NAME_NOT_DEFINED');
             let caller = get_caller_address();
             let factory = get_contract_address();
-            let block_timestamp = get_block_timestamp();
 
             let token = self._fee_token.read();
             let fee_amount = self._creation_fee.read();
@@ -327,10 +336,9 @@ mod Factory {
         // @notice This is used upgrade (Will push a upgrade without this to finalize)
         // @dev Only owner can call
         // @param new_implementation_class New implementation hash
-        fn replace_implementation_class(ref self: ContractState, new_implementation_class: ClassHash) {
+        fn upgrade(ref self: ContractState, new_class_hash: ClassHash) {
             self.ownable_storage.assert_only_owner();
-            assert(!new_implementation_class.is_zero(), 'must be non zero');
-            replace_class_syscall(new_implementation_class);
+            self.upgradeable_storage._upgrade(new_class_hash);
         }
 
     }

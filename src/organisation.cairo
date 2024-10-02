@@ -175,7 +175,7 @@ mod Organisation {
 
     }
 
-    #[external(v0)]
+    #[abi(embed_v0)]
     impl Organisation of super::IOrganisation<ContractState> {
         //
         // Getters

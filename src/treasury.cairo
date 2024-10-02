@@ -80,7 +80,7 @@ mod Treasury {
 
     }
 
-     #[external(v0)]
+    #[abi(embed_v0)]
     impl Treasury of super::ITreasury<ContractState> {
 
         //
